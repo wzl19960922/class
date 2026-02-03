@@ -16,6 +16,7 @@ main.py
 ## 快速开始
 
 
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
