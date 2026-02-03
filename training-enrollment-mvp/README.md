@@ -15,17 +15,7 @@ main.py
 
 ## 快速开始
 
-### Windows（PowerShell，一键）
 
-在项目根目录执行：
-
-```powershell
-.\run_windows.ps1
-```
-
-> 说明：脚本会自动创建虚拟环境、安装依赖并运行 `main.py`。
-
-### 通用（Linux/macOS）
 
 ```bash
 python3 -m venv .venv

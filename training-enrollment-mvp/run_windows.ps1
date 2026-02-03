@@ -17,16 +17,7 @@ if (-not (Test-Path .venv)) {
 }
 
 Write-Host "Activating virtual environment..." -ForegroundColor Yellow
-if (Test-Path .\.venv\Scripts\Activate.ps1) {
-  . .\.venv\Scripts\Activate.ps1
-} elseif (Test-Path .\.venv\Scripts\activate.bat) {
-  Write-Host "Activate.ps1 not found, using activate.bat fallback." -ForegroundColor Yellow
-  cmd /c .\.venv\Scripts\activate.bat ^&^& python -m pip install --upgrade pip ^&^& python -m pip install pandas openpyxl ^&^& python main.py
-  exit $LASTEXITCODE
-} else {
-  Write-Host "Virtual environment activation script not found. Try deleting .venv and re-running." -ForegroundColor Red
-  exit 1
-}
+、
 
 Write-Host "Installing dependencies..." -ForegroundColor Yellow
 python -m pip install --upgrade pip
