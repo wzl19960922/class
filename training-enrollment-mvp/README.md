@@ -36,6 +36,10 @@ python main.py
 
 运行后将创建数据库并导入 `data/sample_enrollments.csv`（同样支持 Excel），输出年度统计结果。
 
+### Windows 常见问题
+
+- 若运行 `.\run_windows.ps1` 提示 `Virtual environment python not found`，请删除 `.venv` 目录后重试。
+
 ## Excel 导入示例
 
 ```python
