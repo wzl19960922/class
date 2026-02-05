@@ -25,14 +25,15 @@ def main() -> None:
     stats = import_enrollments(excel_path, session_id=session_id)
 
     year = 2024
+    print(f"Session ID: {session_id}")
     print(f"导入总行数: {stats.total_rows}")
     print(f"成功导入行数: {stats.imported_rows}")
     print(f"{year}年参训人次: {count_enrollments_for_year(year)}")
     print(f"{year}年参训人数: {count_unique_people_for_year(year)}")
     print(f"{year}年重复参训人数: {count_repeat_people_for_year(year)}")
 
-    print(f"{year}年参训次数 Top 3 学员:")
-    for learner in top_learners_for_year(year, limit=3):
+    print(f"{year}年参训次数 Top 5 学员:")
+    for learner in top_learners_for_year(year, limit=5):
         print(f"- {learner.phone_norm} {learner.name_latest} ({learner.enrollments}次)")
 
 
