@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Optional
-
-import pandas as pd
 
 from app.db.database import get_connection
 from app.importer.phone import PhoneNormalizationError, normalize_phone
@@ -26,46 +25,51 @@ class ImportStats:
     imported_rows: int
 
 
+def _normalize_text(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _normalize_columns(columns: Iterable[str]) -> Dict[str, str]:
     mapping: Dict[str, str] = {}
     for column in columns:
         normalized = str(column).strip()
         lowered = normalized.lower()
         for key, aliases in COLUMN_ALIASES.items():
-            if normalized in aliases or lowered in aliases:
-                mapping[key] = column
+            lowered_aliases = {alias.lower() for alias in aliases}
+            if normalized in aliases or lowered in lowered_aliases:
+                mapping[key] = normalized
     return mapping
 
 
-def _read_value(row: pd.Series, mapping: Dict[str, str], key: str) -> Optional[str]:
+def _read_value(row: Dict[str, object], mapping: Dict[str, str], key: str) -> Optional[str]:
     column = mapping.get(key)
     if column is None:
         return None
-    value = row.get(column)
-    if pd.isna(value):
-        return None
-    return str(value).strip()
+    return _normalize_text(row.get(column))
 
 
-def import_enrollments(excel_path: Path, session_id: int) -> ImportStats:
-    excel_path = Path(excel_path)
-    if not excel_path.exists():
-        raise FileNotFoundError(excel_path)
+def import_enrollments(data_path: Path, session_id: int) -> ImportStats:
+    data_path = Path(data_path)
+    if not data_path.exists():
+        raise FileNotFoundError(data_path)
 
-    dataframes = _load_dataframes(excel_path)
+    rows_by_sheet = _load_rows(data_path)
     total_rows = 0
     imported_rows = 0
 
     with get_connection() as conn:
-        for sheet_name, dataframe in dataframes.items():
-            if dataframe.empty:
+        for sheet_name, rows in rows_by_sheet.items():
+            if not rows:
                 continue
-            dataframe = dataframe.dropna(axis=0, how="all")
-            if dataframe.empty:
-                continue
-            mapping = _normalize_columns(dataframe.columns)
+            mapping = _normalize_columns(rows[0].keys())
 
-            for _, row in dataframe.iterrows():
+            for row in rows:
+                if not any(_normalize_text(value) for value in row.values()):
+                    continue
+
                 total_rows += 1
                 phone_raw = _read_value(row, mapping, "phone")
                 try:
@@ -111,12 +115,32 @@ def import_enrollments(excel_path: Path, session_id: int) -> ImportStats:
     return ImportStats(total_rows=total_rows, imported_rows=imported_rows)
 
 
-def _load_dataframes(source_path: Path) -> Dict[str, pd.DataFrame]:
+def _load_rows(source_path: Path) -> Dict[str, list[Dict[str, object]]]:
     suffix = source_path.suffix.lower()
     if suffix == ".csv":
-        dataframe = pd.read_csv(source_path)
-        return {"csv": dataframe}
-    return pd.read_excel(source_path, sheet_name=None)
+        with source_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+            reader = csv.DictReader(csv_file)
+            return {"csv": [dict(row) for row in reader]}
+
+    if suffix in {".xlsx", ".xls"}:
+        try:
+            import pandas as pd
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "Importing Excel requires pandas/openpyxl. Please install them or use CSV input."
+            ) from exc
+
+        dataframes = pd.read_excel(source_path, sheet_name=None)
+        rows_by_sheet: Dict[str, list[Dict[str, object]]] = {}
+        for sheet_name, dataframe in dataframes.items():
+            if dataframe.empty:
+                rows_by_sheet[sheet_name] = []
+                continue
+            dataframe = dataframe.dropna(axis=0, how="all")
+            rows_by_sheet[sheet_name] = dataframe.to_dict(orient="records")
+        return rows_by_sheet
+
+    raise ValueError("Only CSV and Excel files (.csv/.xlsx/.xls) are supported.")
 
 
 def _get_or_create_person(
