@@ -66,6 +66,14 @@ document.getElementById("import-enrollment").addEventListener("click", async () 
     return;
   }
 
+  const allowedExcelSuffix = [".xlsx", ".xls", ".xlsm", ".xltx", ".xltm"];
+  const lowerName = excelFile.name.toLowerCase();
+  const validExcel = allowedExcelSuffix.some((suffix) => lowerName.endsWith(suffix));
+  if (!validExcel) {
+    showResult(importResult, "仅支持 Excel 文件（.xlsx/.xls/.xlsm/.xltx/.xltm）。", true);
+    return;
+  }
+
   const formData = new FormData();
   formData.append("excel_file", excelFile);
   if (currentSessionId) {
