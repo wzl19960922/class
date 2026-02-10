@@ -16,6 +16,19 @@ if (-not (Test-Path .venv)) {
   & $py.Source -m venv .venv
 }
 
+Write-Host "Using virtual environment..." -ForegroundColor Yellow
+$venvPython = Join-Path -Path .venv -ChildPath "Scripts/python.exe"
+if (-not (Test-Path $venvPython)) {
+  Write-Host "Virtual environment python not found. Try deleting .venv and re-running." -ForegroundColor Red
+  exit 1
+}
+
+Write-Host "Installing dependencies..." -ForegroundColor Yellow
+& $venvPython -m pip install --upgrade pip
+& $venvPython -m pip install pandas openpyxl
+
+Write-Host "Running application..." -ForegroundColor Green
+& $venvPython main.py
 Write-Host "Activating virtual environment..." -ForegroundColor Yellow
 、
 
