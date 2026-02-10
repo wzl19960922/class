@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>学员培训管理系统 MVP</title>
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; margin: 24px; }
+    section { border: 1px solid #ddd; padding: 16px; margin-bottom: 20px; border-radius: 6px; }
+    h2 { margin-top: 0; }
+    label { display: block; margin: 8px 0 4px; }
+    input[type="text"], input[type="date"], input[type="number"] { width: 240px; padding: 6px; }
+    button { margin-top: 12px; padding: 6px 16px; }
+    .hidden { display: none; }
+    .result { margin-top: 12px; background: #f7f7f7; padding: 10px; border-radius: 4px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+    th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
+    .error { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h1>学员培训管理系统 MVP</h1>
+
+  <section id="section-session">
+    <h2>第一步：创建期次（导入通知）</h2>
+    <label>培训标题</label>
+    <input type="text" id="title" />
+    <label>开始日期</label>
+    <input type="date" id="start_date" />
+    <label>结束日期</label>
+    <input type="date" id="end_date" />
+    <label>地点</label>
+    <input type="text" id="location_text" />
+    <label>通知文件（可选）</label>
+    <input type="file" id="notice_file" />
+    <div>
+      <button id="create-session">创建期次</button>
+    </div>
+    <div id="session-result" class="result hidden"></div>
+  </section>
+
+  <section id="section-import" class="hidden">
+    <h2>第二步：导入报名Excel（自动绑定刚创建期次）</h2>
+    <label>报名 Excel 文件</label>
+    <input type="file" id="excel_file" />
+    <div>
+      <button id="import-enrollment">导入</button>
+    </div>
+    <div id="import-result" class="result hidden"></div>
+  </section>
+
+  <section id="section-stats">
+    <h2>年度统计与导出</h2>
+    <label>年份</label>
+    <input type="number" id="year" placeholder="2025" />
+    <div>
+      <button id="fetch-stats">统计</button>
+      <button id="export-year">导出</button>
+    </div>
+    <div id="stats-result" class="result hidden"></div>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

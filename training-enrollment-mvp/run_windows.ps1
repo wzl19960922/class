@@ -29,3 +29,12 @@ Write-Host "Installing dependencies..." -ForegroundColor Yellow
 
 Write-Host "Running application..." -ForegroundColor Green
 & $venvPython main.py
+Write-Host "Activating virtual environment..." -ForegroundColor Yellow
+、
+
+Write-Host "Installing dependencies..." -ForegroundColor Yellow
+python -m pip install --upgrade pip
+python -m pip install pandas openpyxl
+
+Write-Host "Running application..." -ForegroundColor Green
+python main.py

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Optional
@@ -24,6 +25,13 @@ COLUMN_ALIASES = {
 class ImportStats:
     total_rows: int
     imported_rows: int
+
+
+def _normalize_text(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _normalize_columns(columns: Iterable[str]) -> Dict[str, str]:
@@ -53,6 +61,25 @@ def import_enrollments(excel_path: Path, session_id: int) -> ImportStats:
         raise FileNotFoundError(excel_path)
 
     dataframes = _load_dataframes(excel_path)
+            lowered_aliases = {alias.lower() for alias in aliases}
+            if normalized in aliases or lowered in lowered_aliases:
+                mapping[key] = normalized
+    return mapping
+
+
+def _read_value(row: Dict[str, object], mapping: Dict[str, str], key: str) -> Optional[str]:
+    column = mapping.get(key)
+    if column is None:
+        return None
+    return _normalize_text(row.get(column))
+
+
+def import_enrollments(data_path: Path, session_id: int) -> ImportStats:
+    data_path = Path(data_path)
+    if not data_path.exists():
+        raise FileNotFoundError(data_path)
+
+    rows_by_sheet = _load_rows(data_path)
     total_rows = 0
     imported_rows = 0
 
@@ -66,6 +93,15 @@ def import_enrollments(excel_path: Path, session_id: int) -> ImportStats:
             mapping = _normalize_columns(dataframe.columns)
 
             for _, row in dataframe.iterrows():
+        for sheet_name, rows in rows_by_sheet.items():
+            if not rows:
+                continue
+            mapping = _normalize_columns(rows[0].keys())
+
+            for row in rows:
+                if not any(_normalize_text(value) for value in row.values()):
+                    continue
+
                 total_rows += 1
                 phone_raw = _read_value(row, mapping, "phone")
                 try:
@@ -117,6 +153,32 @@ def _load_dataframes(source_path: Path) -> Dict[str, pd.DataFrame]:
         dataframe = pd.read_csv(source_path)
         return {"csv": dataframe}
     return pd.read_excel(source_path, sheet_name=None)
+def _load_rows(source_path: Path) -> Dict[str, list[Dict[str, object]]]:
+    suffix = source_path.suffix.lower()
+    if suffix == ".csv":
+        with source_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+            reader = csv.DictReader(csv_file)
+            return {"csv": [dict(row) for row in reader]}
+
+    if suffix in {".xlsx", ".xls"}:
+        try:
+            import pandas as pd
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "Importing Excel requires pandas/openpyxl. Please install them or use CSV input."
+            ) from exc
+
+        dataframes = pd.read_excel(source_path, sheet_name=None)
+        rows_by_sheet: Dict[str, list[Dict[str, object]]] = {}
+        for sheet_name, dataframe in dataframes.items():
+            if dataframe.empty:
+                rows_by_sheet[sheet_name] = []
+                continue
+            dataframe = dataframe.dropna(axis=0, how="all")
+            rows_by_sheet[sheet_name] = dataframe.to_dict(orient="records")
+        return rows_by_sheet
+
+    raise ValueError("Only CSV and Excel files (.csv/.xlsx/.xls) are supported.")
 
 
 def _get_or_create_person(
