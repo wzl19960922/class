@@ -1,6 +1,6 @@
 const sessionResult = document.getElementById("session-result");
-const importSection = document.getElementById("section-import");
 const importResult = document.getElementById("import-result");
+const importSessionHint = document.getElementById("import-session-hint");
 const statsResult = document.getElementById("stats-result");
 
 let currentSessionId = null;
@@ -53,13 +53,18 @@ document.getElementById("create-session").addEventListener("click", async () => 
     const data = await handleResponse(response);
     currentSessionId = data.session_id;
     showResult(sessionResult, `期次创建成功，session_id: ${currentSessionId}`);
-    importSection.classList.remove("hidden");
+    importSessionHint.textContent = `当前绑定期次 session_id: ${currentSessionId}`;
   } catch (error) {
     showResult(sessionResult, error.message, true);
   }
 });
 
 document.getElementById("import-enrollment").addEventListener("click", async () => {
+  if (!currentSessionId) {
+    showResult(importResult, "请先完成第一步创建期次，再导入报名 Excel。", true);
+    return;
+  }
+
   const excelFile = document.getElementById("excel_file").files[0];
   if (!excelFile) {
     showResult(importResult, "请先选择报名 Excel 文件。", true);

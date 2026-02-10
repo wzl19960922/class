@@ -39,10 +39,11 @@
     <div id="session-result" class="result hidden"></div>
   </section>
 
-  <section id="section-import" class="hidden">
+  <section id="section-import">
     <h2>第二步：导入报名Excel（自动绑定刚创建期次）</h2>
     <label>报名 Excel 文件</label>
     <input type="file" id="excel_file" accept=".xlsx,.xls,.xlsm,.xltx,.xltm" />
+    <p id="import-session-hint">当前未绑定期次，请先完成第一步创建期次。</p>
     <div>
       <button id="import-enrollment">导入</button>
     </div>
