@@ -9,16 +9,18 @@
     section { border: 1px solid #ddd; padding: 16px; margin-bottom: 20px; border-radius: 6px; }
     h1, h2 { margin-top: 0; }
     label { display: block; margin: 8px 0 4px; }
-    input[type="number"] { width: 240px; padding: 6px; }
+    input[type="number"], input[type="text"] { width: 240px; padding: 6px; }
     button, .btn-link { margin-top: 12px; padding: 6px 16px; text-decoration: none; display: inline-block; border: 1px solid #888; border-radius: 4px; color: #222; background: #f7f7f7; }
     .result { margin-top: 12px; background: #f7f7f7; padding: 10px; border-radius: 4px; }
     table { border-collapse: collapse; width: 100%; margin-top: 8px; }
     th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
     .error { color: #b00020; }
     .topbar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
-    .history-box { max-height: 320px; overflow-y: auto; border: 1px solid #e5e5e5; border-radius: 4px; padding: 8px; background: #fafafa; }
-    .history-item { border-bottom: 1px solid #ececec; padding: 8px 0; }
-    .history-item:last-child { border-bottom: none; }
+    .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .history-box, .course-box { max-height: 320px; overflow-y: auto; border: 1px solid #e5e5e5; border-radius: 4px; padding: 8px; background: #fafafa; }
+    .history-item, .course-item { border-bottom: 1px solid #ececec; padding: 8px 0; }
+    .history-item:last-child, .course-item:last-child { border-bottom: none; }
+    @media (max-width: 960px) { .main-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -27,16 +29,32 @@
     <a class="btn-link" href="/add">新增</a>
   </div>
 
-  <section id="section-stats">
-    <h2>主模块：年度统计与导出</h2>
-    <label>年份</label>
-    <input type="number" id="year" placeholder="2025" />
-    <div>
-      <button id="fetch-stats">统计</button>
-      <button id="export-year">导出</button>
-    </div>
-    <div id="stats-result" class="result"></div>
-  </section>
+  <div class="main-grid">
+    <section id="section-stats">
+      <h2>主模块：年度统计与导出</h2>
+      <label>年份</label>
+      <input type="number" id="year" placeholder="2025" />
+      <div>
+        <button id="fetch-stats">统计</button>
+        <button id="export-year">导出</button>
+      </div>
+      <div id="stats-result" class="result"></div>
+    </section>
+
+    <section id="section-course">
+      <h2>课程模块（Word 课程表）</h2>
+      <label>绑定期次 session_id（可选）</label>
+      <input type="text" id="course-session-id" placeholder="例如 12" />
+      <label>上传 Word 课程表（.docx）</label>
+      <input type="file" id="course-word-file" accept=".docx" />
+      <div>
+        <button id="import-course">读取并入库</button>
+        <button id="refresh-courses">刷新课程列表</button>
+      </div>
+      <div id="course-result" class="result"></div>
+      <div id="course-list" class="course-box"></div>
+    </section>
+  </div>
 
   <section id="section-history">
     <h2>历史培训（可滚动）</h2>

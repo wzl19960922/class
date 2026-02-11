@@ -31,9 +31,10 @@ def check_imports() -> None:
     try:
         import pandas  # noqa: F401
         import openpyxl  # noqa: F401
+        import docx  # noqa: F401
     except Exception as exc:
         raise RuntimeError(
-            "缺少 pandas 或 openpyxl，请执行: pip install pandas openpyxl"
+            "缺少 pandas/openpyxl/python-docx，请执行: pip install pandas openpyxl python-docx"
         ) from exc
 
     try:

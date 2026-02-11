@@ -1,5 +1,7 @@
 const statsResult = document.getElementById("stats-result");
 const historyList = document.getElementById("history-list");
+const courseResult = document.getElementById("course-result");
+const courseList = document.getElementById("course-list");
 
 function renderTop5(items) {
   if (!items || items.length === 0) {
@@ -67,6 +69,66 @@ async function fetchHistory() {
   }
 }
 
+async function importCourseTable() {
+  const fileInput = document.getElementById("course-word-file");
+  const wordFile = fileInput.files[0];
+  if (!wordFile) {
+    courseResult.innerHTML = '<p class="error">请先选择 Word 文件。</p>';
+    return;
+  }
+  if (!wordFile.name.toLowerCase().endsWith(".docx")) {
+    courseResult.innerHTML = '<p class="error">仅支持 .docx 文件。</p>';
+    return;
+  }
+
+  const sessionId = document.getElementById("course-session-id").value.trim();
+  if (sessionId && !/^\d+$/.test(sessionId)) {
+    courseResult.innerHTML = '<p class="error">session_id 只能是数字。</p>';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("word_file", wordFile);
+  if (sessionId) {
+    formData.append("session_id", sessionId);
+  }
+
+  try {
+    const response = await fetch("/api/course/import", { method: "POST", body: formData });
+    const data = await handleResponse(response);
+    courseResult.innerHTML = `<p>课程导入成功：${data.imported_courses} 条。</p>`;
+    await fetchCourses();
+  } catch (error) {
+    courseResult.innerHTML = `<p class="error">课程导入失败：${error.message}</p>`;
+  }
+}
+
+async function fetchCourses() {
+  try {
+    const response = await fetch("/api/course/list");
+    const courses = await handleResponse(response);
+    if (!courses || courses.length === 0) {
+      courseList.innerHTML = "<p>暂无课程记录。</p>";
+      return;
+    }
+
+    courseList.innerHTML = courses
+      .map(
+        (item) => `
+          <div class="course-item">
+            <div><strong>${item.course_name}</strong></div>
+            <div>老师：${item.teacher_name || ""}</div>
+            <div>时间：${item.date_text || ""} ${item.time_text || ""}</div>
+            <div>session_id：${item.session_id || "未绑定"}</div>
+          </div>
+        `
+      )
+      .join("");
+  } catch (error) {
+    courseList.innerHTML = `<p class="error">加载课程失败：${error.message}</p>`;
+  }
+}
+
 document.getElementById("fetch-stats").addEventListener("click", fetchStats);
 document.getElementById("export-year").addEventListener("click", () => {
   const year = document.getElementById("year").value.trim();
@@ -77,5 +139,8 @@ document.getElementById("export-year").addEventListener("click", () => {
   window.location.href = `/api/export/year?year=${encodeURIComponent(year)}`;
 });
 document.getElementById("refresh-history").addEventListener("click", fetchHistory);
+document.getElementById("import-course").addEventListener("click", importCourseTable);
+document.getElementById("refresh-courses").addEventListener("click", fetchCourses);
 
 fetchHistory();
+fetchCourses();

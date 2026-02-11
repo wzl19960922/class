@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+from docx import Document
 from flask import Flask, jsonify, render_template, request, send_file
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -21,10 +22,15 @@ LATEST_SESSION_ID: Optional[int] = None
 
 
 ALLOWED_EXCEL_EXTENSIONS = {".xlsx", ".xlsm", ".xltx", ".xltm", ".xls"}
+ALLOWED_WORD_EXTENSIONS = {".docx"}
 
 
 def is_excel_filename(filename: str) -> bool:
     return Path(filename).suffix.lower() in ALLOWED_EXCEL_EXTENSIONS
+
+
+def is_word_filename(filename: str) -> bool:
+    return Path(filename).suffix.lower() in ALLOWED_WORD_EXTENSIONS
 
 
 def get_connection() -> sqlite3.Connection:
@@ -76,6 +82,21 @@ def initialize_database() -> None:
                 source_sheet TEXT,
                 FOREIGN KEY(session_id) REFERENCES training_session(session_id),
                 FOREIGN KEY(person_id) REFERENCES person(person_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS course_schedule (
+                course_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER,
+                course_name TEXT NOT NULL,
+                teacher_name TEXT,
+                date_text TEXT,
+                time_text TEXT,
+                source_file TEXT,
+                created_at TEXT,
+                FOREIGN KEY(session_id) REFERENCES training_session(session_id)
             )
             """
         )
@@ -437,6 +458,149 @@ def import_enrollment():
         return json_response(False, error=f"导入失败: {exc}")
 
     return json_response(True, receipt)
+
+
+
+
+def normalize_cell_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def find_course_column_indexes(headers: List[str]) -> Optional[Dict[str, int]]:
+    mapping: Dict[str, int] = {}
+    for idx, header in enumerate(headers):
+        h = normalize_cell_text(header)
+        if any(key in h for key in ["日期", "日 期"]):
+            mapping["date"] = idx
+        elif any(key in h for key in ["时间", "时 间"]):
+            mapping["time"] = idx
+        elif any(key in h for key in ["内容", "课程", "课程名称"]):
+            mapping["course"] = idx
+        elif any(key in h for key in ["授课教师", "教师", "老师"]):
+            mapping["teacher"] = idx
+
+    if "course" not in mapping:
+        return None
+    return mapping
+
+
+def parse_course_rows_from_word(file_path: str) -> List[Dict[str, str]]:
+    document = Document(file_path)
+    records: List[Dict[str, str]] = []
+
+    for table in document.tables:
+        rows = [
+            [normalize_cell_text(cell.text) for cell in row.cells]
+            for row in table.rows
+        ]
+        if len(rows) < 2:
+            continue
+
+        mapping = find_course_column_indexes(rows[0])
+        if not mapping:
+            continue
+
+        last_date = ""
+        last_time = ""
+        for row in rows[1:]:
+            course_name = row[mapping["course"]].strip() if mapping["course"] < len(row) else ""
+            if not course_name:
+                continue
+
+            date_text = row[mapping["date"]].strip() if mapping.get("date", -1) < len(row) and mapping.get("date") is not None else ""
+            time_text = row[mapping["time"]].strip() if mapping.get("time", -1) < len(row) and mapping.get("time") is not None else ""
+            teacher_name = row[mapping["teacher"]].strip() if mapping.get("teacher", -1) < len(row) and mapping.get("teacher") is not None else ""
+
+            if date_text:
+                last_date = date_text
+            if time_text:
+                last_time = time_text
+
+            records.append(
+                {
+                    "course_name": course_name,
+                    "teacher_name": teacher_name,
+                    "date_text": date_text or last_date,
+                    "time_text": time_text or last_time,
+                }
+            )
+
+    return records
+
+
+@app.route("/api/course/import", methods=["POST"])
+def import_course_word():
+    word_file = request.files.get("word_file")
+    if not word_file or not word_file.filename:
+        return json_response(False, error="请上传 Word 课程表文件。")
+    if not is_word_filename(word_file.filename):
+        return json_response(False, error="仅支持 .docx Word 文件。")
+
+    session_id: Optional[int] = None
+    session_id_text = request.form.get("session_id", "").strip()
+    if session_id_text:
+        if not session_id_text.isdigit():
+            return json_response(False, error="session_id 非法。")
+        session_id = int(session_id_text)
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT session_id FROM training_session WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        if not row:
+            return json_response(False, error="绑定的期次不存在。")
+
+    source_file, file_path = save_upload(word_file)
+    try:
+        rows = parse_course_rows_from_word(file_path)
+    except Exception as exc:
+        return json_response(False, error=f"Word 读取失败: {exc}")
+
+    if not rows:
+        return json_response(False, error="未在 Word 表格中识别到课程内容列，请检查表头。")
+
+    with get_connection() as conn:
+        try:
+            for row in rows:
+                conn.execute(
+                    """
+                    INSERT INTO course_schedule (
+                        session_id, course_name, teacher_name, date_text, time_text,
+                        source_file, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        row["course_name"],
+                        row["teacher_name"] or None,
+                        row["date_text"] or None,
+                        row["time_text"] or None,
+                        source_file,
+                        datetime.now().isoformat(timespec="seconds"),
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return json_response(True, {"imported_courses": len(rows), "rows": rows[:20]})
+
+
+@app.route("/api/course/list")
+def list_courses():
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT course_id, session_id, course_name, teacher_name, date_text, time_text,
+                   source_file, created_at
+            FROM course_schedule
+            ORDER BY course_id DESC
+            LIMIT 200
+            """
+        ).fetchall()
+    return json_response(True, [dict(row) for row in rows])
 
 
 def fetch_yearly_stats(year: str) -> Dict[str, Any]:

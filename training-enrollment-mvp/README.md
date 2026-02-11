@@ -16,7 +16,7 @@ run_windows.cmd
 
 脚本会自动：
 1. 优先使用 Conda（环境名 `training-mvp`），若无 Conda 则回退 `.venv`；
-2. 安装依赖 `flask pandas openpyxl`；
+2. 安装依赖 `flask pandas openpyxl python-docx`；
 3. 运行 `env_check.py`；
 4. 启动服务 `http://127.0.0.1:5000`。
 
