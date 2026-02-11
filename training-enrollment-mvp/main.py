@@ -666,11 +666,9 @@ def create_today_tasks() -> Dict[str, int]:
             start_at = datetime.fromisoformat(course["start_at"]) if course["start_at"] else None
             end_at = datetime.fromisoformat(course["end_at"]) if course["end_at"] else None
 
-            pre_planned = (start_at - timedelta(minutes=10)) if start_at else None
             post_planned = end_at or start_at
 
             tasks = [
-                ("pre", pre_planned, f"【课前提醒】{title} 即将开始，讲师：{teacher}，地点：{location}"),
                 ("post", post_planned, f"【课后问卷】请填写 {title} 的反馈问卷。"),
             ]
 
@@ -899,10 +897,21 @@ def list_today_tasks():
             """
             SELECT mt.task_id, mt.course_id, mt.task_type, mt.planned_at, mt.content,
                    mt.survey_link, mt.qr_data_uri, mt.status, mt.sent_at,
-                   c.title AS course_title, c.teacher AS course_teacher
+                   c.title AS course_title, c.teacher AS course_teacher,
+                   (
+                       SELECT COUNT(1)
+                       FROM survey_response sr
+                       WHERE sr.course_id = mt.course_id
+                   ) AS survey_submitted_count,
+                   (
+                       SELECT COUNT(1)
+                       FROM enrollment e
+                       WHERE e.session_id = c.session_id
+                   ) AS enrollment_total_count
             FROM message_task mt
             JOIN course c ON c.course_id = mt.course_id
             WHERE substr(mt.planned_at, 1, 10) = ?
+              AND mt.task_type = 'post'
             ORDER BY mt.planned_at ASC
             """,
             (today,),

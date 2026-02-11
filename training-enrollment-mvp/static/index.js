@@ -208,6 +208,8 @@ async function editSession(sessionId) {
     document.getElementById("session-edit-end").value = isoToDateValue(data.end_date);
     document.getElementById("session-edit-location").value = data.location_text || "";
     document.getElementById("session-edit-notice").value = "";
+    document.getElementById("session-edit-course-word").value = "";
+    document.getElementById("session-edit-enrollment-file").value = "";
     sessionEditResult.innerHTML = "";
     openSessionEditModal();
   } catch (error) {
@@ -234,10 +236,63 @@ async function saveSessionEdit() {
 
   try {
     await handleResponse(await fetch("/api/session/update", { method: "POST", body: formData }));
-    sessionEditResult.innerHTML = "<p>保存成功。</p>";
+    sessionEditResult.innerHTML = "<p>培训班信息保存成功。</p>";
     await fetchHistory();
   } catch (error) {
     sessionEditResult.innerHTML = `<p class="error">保存失败：${error.message}</p>`;
+  }
+}
+
+async function reimportSessionCourse() {
+  const sessionId = document.getElementById("session-edit-id").value.trim();
+  if (!sessionId) {
+    sessionEditResult.innerHTML = '<p class="error">请先选择一个历史培训班。</p>';
+    return;
+  }
+  const file = document.getElementById("session-edit-course-word").files[0];
+  if (!file) {
+    sessionEditResult.innerHTML = '<p class="error">请先选择 Word 课程表文件。</p>';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("session_id", sessionId);
+  formData.append("word_file", file);
+  try {
+    const data = await handleResponse(await fetch("/api/course/import", { method: "POST", body: formData }));
+    sessionEditResult.innerHTML = `<p>课程表重新导入成功：新增 ${data.imported_courses} 条课程。</p>`;
+    document.getElementById("session-edit-course-word").value = "";
+  } catch (error) {
+    sessionEditResult.innerHTML = `<p class="error">课程表导入失败：${error.message}</p>`;
+  }
+}
+
+async function reimportSessionEnrollment() {
+  const sessionId = document.getElementById("session-edit-id").value.trim();
+  if (!sessionId) {
+    sessionEditResult.innerHTML = '<p class="error">请先选择一个历史培训班。</p>';
+    return;
+  }
+  const file = document.getElementById("session-edit-enrollment-file").files[0];
+  if (!file) {
+    sessionEditResult.innerHTML = '<p class="error">请先选择报名 Excel 文件。</p>';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("session_id", sessionId);
+  formData.append("excel_file", file);
+  try {
+    const data = await handleResponse(await fetch("/api/enrollment/import", { method: "POST", body: formData }));
+    const errors = (data.invalid_rows || []).map((it) => `<li>sheet:${it.sheet} 行:${it.row} 原因:${it.reason}</li>`).join("");
+    sessionEditResult.innerHTML = `
+      <p>学员名单重新导入完成：sheet数 ${data.sheet_count}，有效行 ${data.valid_rows}，新增学员 ${data.new_person_count}，新增报名 ${data.new_enrollment_count}。</p>
+      <ul>${errors || "<li>无异常行</li>"}</ul>
+    `;
+    document.getElementById("session-edit-enrollment-file").value = "";
+    await fetchHistory();
+  } catch (error) {
+    sessionEditResult.innerHTML = `<p class="error">学员名单导入失败：${error.message}</p>`;
   }
 }
 
@@ -255,18 +310,31 @@ async function fetchTodayTasks() {
   try {
     const tasks = await handleResponse(await fetch("/api/tasks/today"));
     if (!tasks.length) {
-      todayTaskList.innerHTML = "<p>今天暂无待发送任务。</p>";
+      todayTaskList.innerHTML = "<p>今天暂无课后待发送任务。</p>";
       return;
     }
 
     todayTaskList.innerHTML = tasks.map((item) => {
-      const qrHtml = item.qr_data_uri ? `<div><img src="${item.qr_data_uri}" alt="二维码" width="120" /></div>` : "";
-      const surveyHtml = item.survey_link ? `<div>问卷：<a href="${item.survey_link}" target="_blank">${item.survey_link}</a></div>` : "";
+      const submitted = Number(item.survey_submitted_count || 0);
+      const total = Number(item.enrollment_total_count || 0);
+      const ratioText = total > 0 ? `${((submitted / total) * 100).toFixed(1)}%` : "--";
+      const surveyHtml = item.survey_link
+        ? `<div>问卷：<a href="${item.survey_link}" target="_blank">${item.survey_link}</a></div>
+           <div style="margin-top:6px;padding:8px;border:1px solid #e7e7e7;border-radius:6px;background:#fff;">
+             <strong>问卷快速结果</strong>
+             <div>填写份数：${submitted}</div>
+             <div>总人数：${total}</div>
+             <div>回收比例：${ratioText}</div>
+           </div>`
+        : "";
+      const qrHtml = item.qr_data_uri
+        ? `<div style="margin-top:6px;"><div>二维码：</div><img src="${item.qr_data_uri}" alt="问卷二维码" width="120" /></div>`
+        : '<div class="inline-tip" style="margin-top:6px;">二维码暂不可用（请检查 Pillow/qrcode 依赖或日志）。</div>';
       const statusText = item.status === "sent" ? "已发送" : "待发送";
       const safeContent = (item.content || "").replace(/"/g, "&quot;");
       return `
         <div class="task-item">
-          <div><strong>${item.course_title || "课程"}</strong>（${item.task_type === "pre" ? "课前" : "课后"}）</div>
+          <div><strong>${item.course_title || "课程"}</strong>（课后）</div>
           <div>计划发送：${item.planned_at}</div>
           <div>内容：${item.content || ""}</div>
           <div>状态：${statusText}</div>
@@ -333,6 +401,8 @@ function bindEvents() {
 
   document.getElementById("close-session-edit").addEventListener("click", closeSessionEditModal);
   document.getElementById("save-session-edit").addEventListener("click", saveSessionEdit);
+  document.getElementById("reimport-session-course").addEventListener("click", reimportSessionCourse);
+  document.getElementById("reimport-session-enrollment").addEventListener("click", reimportSessionEnrollment);
 
   document.getElementById("generate-today-tasks").addEventListener("click", generateTodayTasks);
   document.getElementById("refresh-today-tasks").addEventListener("click", fetchTodayTasks);
