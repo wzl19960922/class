@@ -51,8 +51,7 @@ function resetAddTrainingModal() {
   document.getElementById("new-location").value = "";
   document.getElementById("new-training-goal").value = "";
   document.getElementById("new-notice").value = "";
-  document.getElementById("baidu-api-key").value = "";
-  document.getElementById("baidu-secret-key").value = "";
+  document.getElementById("baidu-access-token").value = "";
   document.getElementById("new-course-word").value = "";
   document.getElementById("new-enrollment-file").value = "";
   newSessionResult.classList.add("hidden");
@@ -256,17 +255,15 @@ async function parseNoticeAndFill() {
     showResult(newSessionResult, "请先选择通知文件，再进行解析。", true);
     return;
   }
-  const apiKey = document.getElementById("baidu-api-key").value.trim();
-  const secretKey = document.getElementById("baidu-secret-key").value.trim();
-  if (!apiKey || !secretKey) {
-    showResult(newSessionResult, "请先输入百度云 API Key 与 Secret Key。", true);
+  const accessToken = document.getElementById("baidu-access-token").value.trim();
+  if (!accessToken) {
+    showResult(newSessionResult, "请先输入百度云 Access Token。", true);
     return;
   }
 
   const formData = new FormData();
   formData.append("notice_file", notice);
-  formData.append("baidu_api_key", apiKey);
-  formData.append("baidu_secret_key", secretKey);
+  formData.append("baidu_access_token", accessToken);
 
   try {
     showResult(newSessionResult, "正在解析通知文件，请稍候...");

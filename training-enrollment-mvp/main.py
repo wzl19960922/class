@@ -8,7 +8,6 @@ import zipfile
 import base64
 import logging
 import urllib.error
-import urllib.parse
 import urllib.request
 from logging.handlers import RotatingFileHandler
 from datetime import date, datetime, timedelta
@@ -386,25 +385,6 @@ def extract_notice_text(file_path: str) -> str:
         return handle.read()
 
 
-def baidu_get_access_token(api_key: str, secret_key: str) -> str:
-    token_url = "https://aip.baidubce.com/oauth/2.0/token"
-    payload = urllib.parse.urlencode(
-        {
-            "grant_type": "client_credentials",
-            "client_id": api_key,
-            "client_secret": secret_key,
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(token_url, data=payload, method="POST")
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        body = resp.read().decode("utf-8")
-    data = json.loads(body)
-    token = data.get("access_token")
-    if not token:
-        raise ValueError(data.get("error_description") or "百度云鉴权失败，请检查 API Key / Secret Key")
-    return token
-
-
 def parse_json_from_text(text: str) -> Dict[str, str]:
     cleaned = (text or "").strip()
     if cleaned.startswith("```"):
@@ -422,9 +402,8 @@ def parse_json_from_text(text: str) -> Dict[str, str]:
     }
 
 
-def parse_notice_with_baidu_llm(notice_text: str, api_key: str, secret_key: str) -> Dict[str, str]:
-    token = baidu_get_access_token(api_key, secret_key)
-    endpoint = f"https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/ernie_speed?access_token={token}"
+def parse_notice_with_baidu_llm(notice_text: str, access_token: str) -> Dict[str, str]:
+    endpoint = f"https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/ernie_speed?access_token={access_token}"
     prompt = (
         "你是信息抽取助手。请从以下培训通知文本提取字段，并且只输出 JSON，不要输出其它内容。"
         "\n字段：title(培训班名称),start_date(YYYY-MM-DD),end_date(YYYY-MM-DD),location_text(培训地点),training_goal(培训目标)。"
@@ -464,17 +443,16 @@ def parse_notice_api():
     if suffix not in {".docx", ".txt"}:
         return json_response(False, error="目前仅支持 .docx 或 .txt 通知文件解析。")
 
-    api_key = request.form.get("baidu_api_key", "").strip()
-    secret_key = request.form.get("baidu_secret_key", "").strip()
-    if not api_key or not secret_key:
-        return json_response(False, error="请填写百度云 API Key 与 Secret Key。")
+    access_token = request.form.get("baidu_access_token", "").strip()
+    if not access_token:
+        return json_response(False, error="请填写百度云 Access Token。")
 
     _, file_path = save_upload(notice_file)
     try:
         notice_text = extract_notice_text(file_path)
         if not notice_text.strip():
             return json_response(False, error="通知文件未读取到有效文本，请检查文档内容。")
-        parsed = parse_notice_with_baidu_llm(notice_text, api_key, secret_key)
+        parsed = parse_notice_with_baidu_llm(notice_text, access_token)
         return json_response(True, parsed)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
