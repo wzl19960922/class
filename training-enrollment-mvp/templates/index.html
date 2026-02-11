@@ -6,38 +6,41 @@
   <title>学员培训管理系统 MVP</title>
   <style>
     body { font-family: "Microsoft YaHei", sans-serif; margin: 24px; }
-    section { border: 1px solid #ddd; padding: 16px; margin-bottom: 20px; border-radius: 6px; }
-    h1, h2 { margin-top: 0; }
-    label { display: block; margin: 8px 0 4px; }
-    input[type="number"], input[type="text"] { width: 240px; padding: 6px; }
-    button, .btn-link { margin-top: 12px; padding: 6px 16px; text-decoration: none; display: inline-block; border: 1px solid #888; border-radius: 4px; color: #222; background: #f7f7f7; }
-    .result { margin-top: 12px; background: #f7f7f7; padding: 10px; border-radius: 4px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 8px; }
-    th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
+    h1, h2, h3 { margin-top: 0; }
+    section { border: 1px solid #ddd; padding: 16px; margin-bottom: 16px; border-radius: 8px; }
+    .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    .result { margin-top: 10px; background: #f7f7f7; padding: 10px; border-radius: 6px; }
     .error { color: #b00020; }
-    .topbar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
-    .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .history-box, .course-box, .task-box { max-height: 320px; overflow-y: auto; border: 1px solid #e5e5e5; border-radius: 4px; padding: 8px; background: #fafafa; }
-    .history-item, .course-item, .task-item { border-bottom: 1px solid #ececec; padding: 8px 0; }
-    .history-item:last-child, .course-item:last-child, .task-item:last-child { border-bottom: none; }
-    .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: center; justify-content: center; }
+    label { display: block; margin: 8px 0 4px; }
+    input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"] {
+      width: 260px; max-width: 95%; padding: 6px;
+    }
+    button {
+      margin-top: 10px; margin-right: 8px; padding: 6px 14px;
+      border: 1px solid #888; border-radius: 4px; background: #f8f8f8; cursor: pointer;
+    }
+    .history-box, .task-box, .log-box { max-height: 340px; overflow-y: auto; border: 1px solid #e6e6e6; background: #fafafa; border-radius: 6px; padding: 8px; }
+    .history-item, .task-item { border-bottom: 1px solid #ececec; padding: 8px 0; }
+    .history-item:last-child, .task-item:last-child { border-bottom: none; }
+    .inline-tip { color: #666; font-size: 13px; }
+    .modal-mask { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.38); z-index: 1000; }
     .modal-mask.show { display: flex; }
-    .modal-panel { width: 540px; max-width: 90vw; background: #fff; border-radius: 8px; padding: 16px; }
-    .modal-title { margin-top: 0; }
+    .modal-panel { width: 760px; max-width: 92vw; max-height: 90vh; overflow-y: auto; background: #fff; border-radius: 10px; padding: 16px; }
+    .modal-block { border: 1px solid #e5e5e5; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .modal-actions { margin-top: 10px; }
+    .hidden { display: none; }
     @media (max-width: 960px) { .main-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
-  <div class="topbar">
-    <h1 style="margin:0;">年度统计与导出</h1>
-    <a class="btn-link" href="/add">新增</a>
-  </div>
+  <h1>学员培训管理系统</h1>
 
   <div class="main-grid">
-    <section id="section-stats">
+    <section>
       <h2>主模块：年度统计与导出</h2>
       <label>年份</label>
-      <input type="number" id="year" placeholder="2025" />
+      <input type="number" id="year" placeholder="2026" />
       <div>
         <button id="fetch-stats">统计</button>
         <button id="export-year">导出</button>
@@ -45,39 +48,18 @@
       <div id="stats-result" class="result"></div>
     </section>
 
-    <section id="section-course">
-      <h2>课程模块（Word + CRUD）</h2>
-      <label>绑定期次 session_id（可选）</label>
-      <input type="text" id="course-session-id" placeholder="例如 12" />
-      <label>上传 Word 课程表（.docx）</label>
-      <input type="file" id="course-word-file" accept=".docx" />
+    <section>
+      <h2>培训班模块（含课程）</h2>
+      <div class="inline-tip">课程模块已融入培训班新增流程：新增培训班信息 → 新增课程表 → 新增人员信息。</div>
       <div>
-        <button id="import-course">读取并入库</button>
+        <button id="open-add-training">新增培训班</button>
+        <button id="refresh-history">刷新历史培训班</button>
       </div>
-
-      <h3>手工新增课程</h3>
-      <label>课程名称</label>
-      <input type="text" id="course-title" />
-      <label>老师</label>
-      <input type="text" id="course-teacher" />
-      <label>开始时间（YYYY-MM-DDTHH:MM:SS）</label>
-      <input type="text" id="course-start-at" placeholder="2026-02-11T08:30:00" />
-      <label>结束时间（YYYY-MM-DDTHH:MM:SS）</label>
-      <input type="text" id="course-end-at" placeholder="2026-02-11T09:30:00" />
-      <label>地点</label>
-      <input type="text" id="course-location" />
-      <div>
-        <button id="save-course">保存课程</button>
-        <button id="reset-course-form">清空表单</button>
-        <button id="open-course-list">查看历史课程（弹窗）</button>
-        <button id="refresh-courses">刷新课程列表</button>
-      </div>
-      <div id="course-result" class="result"></div>
-
+      <div id="history-list" class="history-box"></div>
     </section>
   </div>
 
-  <section id="section-today-tasks">
+  <section>
     <h2>今天待发送</h2>
     <button id="generate-today-tasks">生成今天任务</button>
     <button id="refresh-today-tasks">刷新任务列表</button>
@@ -85,63 +67,83 @@
     <div id="today-task-list" class="task-box"></div>
   </section>
 
-  <section id="section-history">
-    <h2>历史培训（可滚动）</h2>
-    <button id="refresh-history">刷新历史培训</button>
-    <div id="history-list" class="history-box"></div>
+  <section>
+    <h2>运行日志（错误排查）</h2>
+    <button id="refresh-logs">刷新日志</button>
+    <div id="log-path" class="result"></div>
+    <pre id="log-content" class="log-box"></pre>
   </section>
 
-
-  <div id="course-list-modal" class="modal-mask">
+  <div id="add-training-modal" class="modal-mask">
     <div class="modal-panel">
-      <h3 class="modal-title">历史课程（弹窗滚动）</h3>
-      <button id="close-course-list">关闭</button>
-      <div id="course-list" class="course-box"></div>
-    </div>
-  </div>
+      <div class="modal-header">
+        <h3>新增培训班</h3>
+        <button id="close-add-training">关闭</button>
+      </div>
 
-  <div id="course-edit-modal" class="modal-mask">
-    <div class="modal-panel">
-      <h3>编辑课程</h3>
-      <input type="hidden" id="course-edit-id" />
-      <label>课程名称</label>
-      <input type="text" id="course-edit-title" />
-      <label>老师</label>
-      <input type="text" id="course-edit-teacher" />
-      <label>开始时间（YYYY-MM-DDTHH:MM:SS）</label>
-      <input type="text" id="course-edit-start-at" />
-      <label>结束时间（YYYY-MM-DDTHH:MM:SS）</label>
-      <input type="text" id="course-edit-end-at" />
-      <label>地点</label>
-      <input type="text" id="course-edit-location" />
-      <label>session_id（可选）</label>
-      <input type="text" id="course-edit-session-id" />
-      <div>
-        <button id="save-course-edit">保存修改</button>
-        <button id="close-course-edit">取消</button>
+      <div class="modal-block">
+        <h4>① 新增培训班信息</h4>
+        <label>培训标题</label>
+        <input type="text" id="new-title" />
+        <label>开始日期</label>
+        <input type="date" id="new-start-date" />
+        <label>结束日期</label>
+        <input type="date" id="new-end-date" />
+        <label>地点</label>
+        <input type="text" id="new-location" />
+        <label>通知文件（可选）</label>
+        <input type="file" id="new-notice" />
+        <div class="modal-actions">
+          <button id="create-session">创建培训班</button>
+        </div>
+        <div id="new-session-result" class="result hidden"></div>
+      </div>
+
+      <div class="modal-block">
+        <h4>② 新增课程表（Word）</h4>
+        <p id="new-course-session-tip" class="inline-tip">当前未绑定培训班，请先完成第①步。</p>
+        <label>课程表 Word 文件（.docx）</label>
+        <input type="file" id="new-course-word" accept=".docx" />
+        <div class="modal-actions">
+          <button id="import-course-word">导入课程表</button>
+        </div>
+        <div id="new-course-result" class="result hidden"></div>
+      </div>
+
+      <div class="modal-block">
+        <h4>③ 新增人员信息（报名 Excel）</h4>
+        <p id="new-enrollment-session-tip" class="inline-tip">当前未绑定培训班，请先完成第①步。</p>
+        <label>报名 Excel 文件</label>
+        <input type="file" id="new-enrollment-file" accept=".xlsx,.xls,.xlsm,.xltx,.xltm" />
+        <div class="modal-actions">
+          <button id="import-enrollment">导入人员</button>
+        </div>
+        <div id="new-enrollment-result" class="result hidden"></div>
       </div>
     </div>
   </div>
 
-
   <div id="session-edit-modal" class="modal-mask">
-    <div class="modal-panel">
-      <h3 class="modal-title">编辑历史培训</h3>
+    <div class="modal-panel" style="width:540px;">
+      <div class="modal-header">
+        <h3>编辑历史培训班</h3>
+        <button id="close-session-edit">关闭</button>
+      </div>
       <input type="hidden" id="session-edit-id" />
       <label>培训标题</label>
       <input type="text" id="session-edit-title" />
       <label>开始日期</label>
-      <input type="text" id="session-edit-start-date" placeholder="YYYY-MM-DD" />
+      <input type="date" id="session-edit-start" />
       <label>结束日期</label>
-      <input type="text" id="session-edit-end-date" placeholder="YYYY-MM-DD" />
+      <input type="date" id="session-edit-end" />
       <label>地点</label>
       <input type="text" id="session-edit-location" />
-      <label>通知文件（可选，重新上传覆盖）</label>
+      <label>重新上传通知文件（可选）</label>
       <input type="file" id="session-edit-notice" />
-      <div>
+      <div class="modal-actions">
         <button id="save-session-edit">保存修改</button>
-        <button id="close-session-edit">取消</button>
       </div>
+      <div id="session-edit-result" class="result"></div>
     </div>
   </div>
 

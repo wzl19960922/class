@@ -5,6 +5,8 @@ import re
 import sqlite3
 import zipfile
 import base64
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -17,10 +19,24 @@ from flask import Flask, jsonify, render_template, request, send_file
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "training.db"
 UPLOAD_DIR = BASE_DIR / "uploads"
+LOG_DIR = BASE_DIR / "logs"
+LOG_PATH = LOG_DIR / "app.log"
 
 app = Flask(__name__)
 
 LATEST_SESSION_ID: Optional[int] = None
+
+
+def setup_logging() -> None:
+    LOG_DIR.mkdir(exist_ok=True)
+    handler = RotatingFileHandler(LOG_PATH, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    )
+    app.logger.setLevel(logging.INFO)
+    app.logger.handlers.clear()
+    app.logger.addHandler(handler)
+    app.logger.addHandler(logging.StreamHandler())
 
 
 ALLOWED_EXCEL_EXTENSIONS = {".xlsx", ".xlsm", ".xltx", ".xltm", ".xls"}
@@ -201,6 +217,7 @@ def json_response(ok: bool, data: Any = None, error: Optional[str] = None):
 
 @app.errorhandler(Exception)
 def handle_exception(exc: Exception):
+    app.logger.exception("Unhandled exception on %s %s", request.method, request.path)
     if request.path.startswith("/api/"):
         return json_response(False, error=f"服务异常: {exc}"), 500
     raise exc
@@ -666,7 +683,11 @@ def create_today_tasks() -> Dict[str, int]:
                 qr_data_uri = None
                 if task_type == "post":
                     survey_link = f"http://127.0.0.1:5000/survey/{course_id}"
-                    qr_data_uri = build_qr_data_uri(survey_link)
+                    try:
+                        qr_data_uri = build_qr_data_uri(survey_link)
+                    except Exception as exc:
+                        qr_data_uri = None
+                        app.logger.exception("QR generation failed for course_id=%s: %s", course_id, exc)
 
                 try:
                     conn.execute(
@@ -903,6 +924,17 @@ def mark_task_sent(task_id: int):
     return json_response(True, {"task_id": task_id})
 
 
+@app.route("/api/logs/recent")
+def recent_logs():
+    lines = int(request.args.get("lines", "200"))
+    lines = max(20, min(lines, 1000))
+    if not LOG_PATH.exists():
+        return json_response(True, {"log_path": str(LOG_PATH), "lines": []})
+
+    content = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
+    return json_response(True, {"log_path": str(LOG_PATH), "lines": content[-lines:]})
+
+
 @app.route("/survey/<int:course_id>")
 def survey_page(course_id: int):
     with get_connection() as conn:
@@ -1075,6 +1107,7 @@ def export_year():
 
 
 if __name__ == "__main__":
+    setup_logging()
     initialize_database()
     print("本地服务已启动，请访问 http://127.0.0.1:5000")
     app.run(host="127.0.0.1", port=5000)

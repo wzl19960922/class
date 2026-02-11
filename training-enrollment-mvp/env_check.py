@@ -33,9 +33,10 @@ def check_imports() -> None:
         import openpyxl  # noqa: F401
         import docx  # noqa: F401
         import qrcode  # noqa: F401
+        import PIL  # noqa: F401
     except Exception as exc:
         raise RuntimeError(
-            "缺少 pandas/openpyxl/python-docx/qrcode，请执行: pip install pandas openpyxl python-docx qrcode[pil]"
+            "缺少 pandas/openpyxl/python-docx/qrcode/pillow，请执行: pip install pandas openpyxl python-docx qrcode[pil]"
         ) from exc
 
     try:
