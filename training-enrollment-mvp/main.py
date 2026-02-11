@@ -4,11 +4,13 @@ import os
 import re
 import sqlite3
 import zipfile
-from datetime import datetime
+import base64
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+import qrcode
 from docx import Document
 from flask import Flask, jsonify, render_template, request, send_file
 
@@ -87,16 +89,49 @@ def initialize_database() -> None:
         )
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS course_schedule (
+            CREATE TABLE IF NOT EXISTS course (
                 course_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                teacher TEXT,
+                start_at TEXT,
+                end_at TEXT,
+                location TEXT,
                 session_id INTEGER,
-                course_name TEXT NOT NULL,
-                teacher_name TEXT,
-                date_text TEXT,
-                time_text TEXT,
                 source_file TEXT,
                 created_at TEXT,
                 FOREIGN KEY(session_id) REFERENCES training_session(session_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS message_task (
+                task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                course_id INTEGER NOT NULL,
+                task_type TEXT NOT NULL,
+                planned_at TEXT NOT NULL,
+                content TEXT,
+                survey_link TEXT,
+                qr_data_uri TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                sent_at TEXT,
+                created_at TEXT,
+                UNIQUE(course_id, task_type, planned_at),
+                FOREIGN KEY(course_id) REFERENCES course(course_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS survey_response (
+                response_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                course_id INTEGER NOT NULL,
+                satisfaction_score INTEGER,
+                gain_text TEXT,
+                suggestion_text TEXT,
+                recommend_score INTEGER,
+                submitted_at TEXT,
+                FOREIGN KEY(course_id) REFERENCES course(course_id)
             )
             """
         )
@@ -484,9 +519,47 @@ def find_course_column_indexes(headers: List[str]) -> Optional[Dict[str, int]]:
     return mapping
 
 
-def parse_course_rows_from_word(file_path: str) -> List[Dict[str, str]]:
+def parse_date_text(date_text: str, default_year: int) -> Optional[date]:
+    text = normalize_cell_text(date_text)
+    if not text:
+        return None
+    nums = re.findall(r"\d+", text)
+    if len(nums) >= 3:
+        year, month, day = int(nums[0]), int(nums[1]), int(nums[2])
+    elif len(nums) >= 2:
+        year, month, day = default_year, int(nums[0]), int(nums[1])
+    else:
+        return None
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def parse_time_range(time_text: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+    text = normalize_cell_text(time_text).replace("：", ":")
+    times = re.findall(r"(\d{1,2}:\d{2})", text)
+    if len(times) >= 2:
+        return times[0], times[1]
+    if len(times) == 1:
+        return times[0], None
+    return None, None
+
+
+def combine_date_time(day: Optional[date], time_val: Optional[str]) -> Optional[str]:
+    if not day:
+        return None
+    if not time_val:
+        return datetime(day.year, day.month, day.day, 0, 0).isoformat(timespec="seconds")
+    hour, minute = [int(x) for x in time_val.split(":", 1)]
+    return datetime(day.year, day.month, day.day, hour, minute).isoformat(timespec="seconds")
+
+
+def parse_course_rows_from_word(
+    file_path: str, default_year: int, location_text: str = "", session_id: Optional[int] = None
+) -> List[Dict[str, Any]]:
     document = Document(file_path)
-    records: List[Dict[str, str]] = []
+    records: List[Dict[str, Any]] = []
 
     for table in document.tables:
         rows = [
@@ -500,32 +573,120 @@ def parse_course_rows_from_word(file_path: str) -> List[Dict[str, str]]:
         if not mapping:
             continue
 
-        last_date = ""
-        last_time = ""
+        last_date_text = ""
+        last_time_text = ""
         for row in rows[1:]:
             course_name = row[mapping["course"]].strip() if mapping["course"] < len(row) else ""
-            if not course_name:
+            if not course_name or course_name in {"报到", "返程", "下午", "上午"}:
                 continue
 
-            date_text = row[mapping["date"]].strip() if mapping.get("date", -1) < len(row) and mapping.get("date") is not None else ""
-            time_text = row[mapping["time"]].strip() if mapping.get("time", -1) < len(row) and mapping.get("time") is not None else ""
-            teacher_name = row[mapping["teacher"]].strip() if mapping.get("teacher", -1) < len(row) and mapping.get("teacher") is not None else ""
+            date_text = row[mapping["date"]].strip() if mapping.get("date") is not None and mapping["date"] < len(row) else ""
+            time_text = row[mapping["time"]].strip() if mapping.get("time") is not None and mapping["time"] < len(row) else ""
+            teacher_name = row[mapping["teacher"]].strip() if mapping.get("teacher") is not None and mapping["teacher"] < len(row) else ""
 
             if date_text:
-                last_date = date_text
+                last_date_text = date_text
             if time_text:
-                last_time = time_text
+                last_time_text = time_text
+
+            final_date_text = date_text or last_date_text
+            final_time_text = time_text or last_time_text
+
+            day = parse_date_text(final_date_text, default_year)
+            start_time, end_time = parse_time_range(final_time_text)
+            start_at = combine_date_time(day, start_time)
+            end_at = combine_date_time(day, end_time)
 
             records.append(
                 {
-                    "course_name": course_name,
-                    "teacher_name": teacher_name,
-                    "date_text": date_text or last_date,
-                    "time_text": time_text or last_time,
+                    "title": course_name,
+                    "teacher": teacher_name,
+                    "start_at": start_at,
+                    "end_at": end_at,
+                    "location": location_text,
+                    "session_id": session_id,
                 }
             )
 
     return records
+
+
+def build_qr_data_uri(text: str) -> str:
+    image = qrcode.make(text)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{encoded}"
+
+
+def create_today_tasks() -> Dict[str, int]:
+    today = date.today().isoformat()
+    generated = 0
+    skipped = 0
+
+    with get_connection() as conn:
+        courses = conn.execute(
+            """
+            SELECT course_id, title, teacher, start_at, end_at, location
+            FROM course
+            WHERE substr(start_at, 1, 10) = ?
+            """,
+            (today,),
+        ).fetchall()
+
+        for course in courses:
+            course_id = course["course_id"]
+            title = course["title"] or "课程"
+            teacher = course["teacher"] or ""
+            location = course["location"] or ""
+            start_at = datetime.fromisoformat(course["start_at"]) if course["start_at"] else None
+            end_at = datetime.fromisoformat(course["end_at"]) if course["end_at"] else None
+
+            pre_planned = (start_at - timedelta(minutes=10)) if start_at else None
+            post_planned = end_at or start_at
+
+            tasks = [
+                ("pre", pre_planned, f"【课前提醒】{title} 即将开始，讲师：{teacher}，地点：{location}"),
+                ("post", post_planned, f"【课后问卷】请填写 {title} 的反馈问卷。"),
+            ]
+
+            for task_type, planned, content in tasks:
+                if not planned:
+                    skipped += 1
+                    continue
+                planned_iso = planned.isoformat(timespec="seconds")
+                survey_link = None
+                qr_data_uri = None
+                if task_type == "post":
+                    survey_link = f"http://127.0.0.1:5000/survey/{course_id}"
+                    qr_data_uri = build_qr_data_uri(survey_link)
+
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO message_task (
+                            course_id, task_type, planned_at, content, survey_link,
+                            qr_data_uri, status, created_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+                        """,
+                        (
+                            course_id,
+                            task_type,
+                            planned_iso,
+                            content,
+                            survey_link,
+                            qr_data_uri,
+                            datetime.now().isoformat(timespec="seconds"),
+                        ),
+                    )
+                    generated += 1
+                except sqlite3.IntegrityError:
+                    skipped += 1
+                    continue
+        conn.commit()
+
+    return {"generated": generated, "skipped": skipped}
 
 
 @app.route("/api/course/import", methods=["POST"])
@@ -537,22 +698,28 @@ def import_course_word():
         return json_response(False, error="仅支持 .docx Word 文件。")
 
     session_id: Optional[int] = None
+    default_year = date.today().year
+    location_text = ""
     session_id_text = request.form.get("session_id", "").strip()
     if session_id_text:
         if not session_id_text.isdigit():
             return json_response(False, error="session_id 非法。")
         session_id = int(session_id_text)
         with get_connection() as conn:
-            row = conn.execute(
-                "SELECT session_id FROM training_session WHERE session_id = ?",
+            session_row = conn.execute(
+                "SELECT session_id, start_date, location_text FROM training_session WHERE session_id = ?",
                 (session_id,),
             ).fetchone()
-        if not row:
+        if not session_row:
             return json_response(False, error="绑定的期次不存在。")
+        location_text = session_row["location_text"] or ""
+        start_date = session_row["start_date"] or ""
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_date):
+            default_year = int(start_date[:4])
 
     source_file, file_path = save_upload(word_file)
     try:
-        rows = parse_course_rows_from_word(file_path)
+        rows = parse_course_rows_from_word(file_path, default_year, location_text, session_id)
     except Exception as exc:
         return json_response(False, error=f"Word 读取失败: {exc}")
 
@@ -564,18 +731,19 @@ def import_course_word():
             for row in rows:
                 conn.execute(
                     """
-                    INSERT INTO course_schedule (
-                        session_id, course_name, teacher_name, date_text, time_text,
+                    INSERT INTO course (
+                        title, teacher, start_at, end_at, location, session_id,
                         source_file, created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        session_id,
-                        row["course_name"],
-                        row["teacher_name"] or None,
-                        row["date_text"] or None,
-                        row["time_text"] or None,
+                        row["title"],
+                        row["teacher"] or None,
+                        row["start_at"],
+                        row["end_at"],
+                        row["location"] or None,
+                        row["session_id"],
                         source_file,
                         datetime.now().isoformat(timespec="seconds"),
                     ),
@@ -593,14 +761,99 @@ def list_courses():
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT course_id, session_id, course_name, teacher_name, date_text, time_text,
-                   source_file, created_at
-            FROM course_schedule
-            ORDER BY course_id DESC
-            LIMIT 200
+            SELECT course_id, title, teacher, start_at, end_at, location,
+                   session_id, source_file, created_at
+            FROM course
+            ORDER BY COALESCE(start_at, created_at) DESC, course_id DESC
+            LIMIT 300
             """
         ).fetchall()
     return json_response(True, [dict(row) for row in rows])
+
+
+@app.route("/api/tasks/generate_today", methods=["POST"])
+def generate_today_tasks():
+    result = create_today_tasks()
+    return json_response(True, result)
+
+
+@app.route("/api/tasks/today")
+def list_today_tasks():
+    today = date.today().isoformat()
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT mt.task_id, mt.course_id, mt.task_type, mt.planned_at, mt.content,
+                   mt.survey_link, mt.qr_data_uri, mt.status, mt.sent_at,
+                   c.title AS course_title, c.teacher AS course_teacher
+            FROM message_task mt
+            JOIN course c ON c.course_id = mt.course_id
+            WHERE substr(mt.planned_at, 1, 10) = ?
+            ORDER BY mt.planned_at ASC
+            """,
+            (today,),
+        ).fetchall()
+    return json_response(True, [dict(row) for row in rows])
+
+
+@app.route("/api/tasks/<int:task_id>/mark_sent", methods=["POST"])
+def mark_task_sent(task_id: int):
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE message_task
+            SET status = 'sent', sent_at = ?
+            WHERE task_id = ?
+            """,
+            (datetime.now().isoformat(timespec="seconds"), task_id),
+        )
+    return json_response(True, {"task_id": task_id})
+
+
+@app.route("/survey/<int:course_id>")
+def survey_page(course_id: int):
+    with get_connection() as conn:
+        course = conn.execute(
+            "SELECT course_id, title, teacher FROM course WHERE course_id = ?",
+            (course_id,),
+        ).fetchone()
+    if not course:
+        return "课程不存在", 404
+    return render_template("survey.html", course=dict(course))
+
+
+@app.route("/api/survey/submit", methods=["POST"])
+def submit_survey():
+    payload = request.get_json(silent=True) or {}
+    course_id = payload.get("course_id")
+    if not isinstance(course_id, int):
+        return json_response(False, error="course_id 非法。")
+
+    with get_connection() as conn:
+        course = conn.execute(
+            "SELECT course_id FROM course WHERE course_id = ?",
+            (course_id,),
+        ).fetchone()
+        if not course:
+            return json_response(False, error="课程不存在。")
+
+        conn.execute(
+            """
+            INSERT INTO survey_response (
+                course_id, satisfaction_score, gain_text, suggestion_text,
+                recommend_score, submitted_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                course_id,
+                payload.get("satisfaction_score"),
+                payload.get("gain_text"),
+                payload.get("suggestion_text"),
+                payload.get("recommend_score"),
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+    return json_response(True, {"course_id": course_id})
 
 
 def fetch_yearly_stats(year: str) -> Dict[str, Any]:

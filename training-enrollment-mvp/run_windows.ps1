@@ -26,7 +26,7 @@ function Ensure-EnvWithConda {
 
     Write-Host "安装依赖..." -ForegroundColor Yellow
     & $CondaExe run -n $EnvName python -m pip install --upgrade pip
-    & $CondaExe run -n $EnvName python -m pip install flask pandas openpyxl python-docx
+    & $CondaExe run -n $EnvName python -m pip install flask pandas openpyxl python-docx qrcode[pil]
 
     Write-Host "运行环境检查..." -ForegroundColor Yellow
     & $CondaExe run -n $EnvName python env_check.py
@@ -60,7 +60,7 @@ function Ensure-EnvWithVenv {
 
     Write-Host "安装依赖..." -ForegroundColor Yellow
     & $venvPython -m pip install --upgrade pip
-    & $venvPython -m pip install flask pandas openpyxl python-docx
+    & $venvPython -m pip install flask pandas openpyxl python-docx qrcode[pil]
 
     Write-Host "运行环境检查..." -ForegroundColor Yellow
     & $venvPython env_check.py

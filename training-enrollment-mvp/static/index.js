@@ -2,6 +2,8 @@ const statsResult = document.getElementById("stats-result");
 const historyList = document.getElementById("history-list");
 const courseResult = document.getElementById("course-result");
 const courseList = document.getElementById("course-list");
+const todayTaskResult = document.getElementById("today-task-result");
+const todayTaskList = document.getElementById("today-task-list");
 
 function renderTop5(items) {
   if (!items || items.length === 0) {
@@ -116,9 +118,11 @@ async function fetchCourses() {
       .map(
         (item) => `
           <div class="course-item">
-            <div><strong>${item.course_name}</strong></div>
-            <div>老师：${item.teacher_name || ""}</div>
-            <div>时间：${item.date_text || ""} ${item.time_text || ""}</div>
+            <div><strong>${item.title}</strong></div>
+            <div>老师：${item.teacher || ""}</div>
+            <div>开始：${item.start_at || ""}</div>
+            <div>结束：${item.end_at || ""}</div>
+            <div>地点：${item.location || ""}</div>
             <div>session_id：${item.session_id || "未绑定"}</div>
           </div>
         `
@@ -126,6 +130,70 @@ async function fetchCourses() {
       .join("");
   } catch (error) {
     courseList.innerHTML = `<p class="error">加载课程失败：${error.message}</p>`;
+  }
+}
+
+async function generateTodayTasks() {
+  try {
+    const response = await fetch("/api/tasks/generate_today", { method: "POST" });
+    const data = await handleResponse(response);
+    todayTaskResult.innerHTML = `<p>任务生成完成：新增 ${data.generated} 条，跳过 ${data.skipped} 条。</p>`;
+    await fetchTodayTasks();
+  } catch (error) {
+    todayTaskResult.innerHTML = `<p class="error">生成任务失败：${error.message}</p>`;
+  }
+}
+
+async function markTaskSent(taskId) {
+  try {
+    await handleResponse(await fetch(`/api/tasks/${taskId}/mark_sent`, { method: "POST" }));
+    await fetchTodayTasks();
+  } catch (error) {
+    alert(`标记失败：${error.message}`);
+  }
+}
+
+async function copyTaskContent(taskId, content) {
+  try {
+    await navigator.clipboard.writeText(content);
+    alert(`任务 ${taskId} 文案已复制`);
+  } catch {
+    alert("复制失败，请手动复制。");
+  }
+}
+
+async function fetchTodayTasks() {
+  try {
+    const tasks = await handleResponse(await fetch("/api/tasks/today"));
+    if (!tasks || tasks.length === 0) {
+      todayTaskList.innerHTML = "<p>今天暂无待发送任务。</p>";
+      return;
+    }
+
+    todayTaskList.innerHTML = tasks
+      .map((item) => {
+        const qrHtml = item.qr_data_uri ? `<div><img src="${item.qr_data_uri}" alt="二维码" width="120" /></div>` : "";
+        const surveyHtml = item.survey_link ? `<div>问卷：<a href="${item.survey_link}" target="_blank">${item.survey_link}</a></div>` : "";
+        const statusText = item.status === "sent" ? "已发送" : "待发送";
+        const escapedContent = (item.content || "").replace(/"/g, "&quot;");
+        return `
+          <div class="task-item">
+            <div><strong>${item.course_title || "课程"}</strong>（${item.task_type === "pre" ? "课前" : "课后"}）</div>
+            <div>计划发送：${item.planned_at}</div>
+            <div>内容：${item.content || ""}</div>
+            <div>状态：${statusText}</div>
+            ${surveyHtml}
+            ${qrHtml}
+            <div>
+              <button onclick="copyTaskContent(${item.task_id}, \"${escapedContent}\")">复制文案</button>
+              <button onclick="markTaskSent(${item.task_id})">标记已发送</button>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+  } catch (error) {
+    todayTaskList.innerHTML = `<p class="error">加载今天任务失败：${error.message}</p>`;
   }
 }
 
@@ -141,6 +209,12 @@ document.getElementById("export-year").addEventListener("click", () => {
 document.getElementById("refresh-history").addEventListener("click", fetchHistory);
 document.getElementById("import-course").addEventListener("click", importCourseTable);
 document.getElementById("refresh-courses").addEventListener("click", fetchCourses);
+document.getElementById("generate-today-tasks").addEventListener("click", generateTodayTasks);
+document.getElementById("refresh-today-tasks").addEventListener("click", fetchTodayTasks);
+
+window.copyTaskContent = copyTaskContent;
+window.markTaskSent = markTaskSent;
 
 fetchHistory();
 fetchCourses();
+fetchTodayTasks();

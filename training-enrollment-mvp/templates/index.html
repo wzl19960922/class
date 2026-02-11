@@ -17,9 +17,9 @@
     .error { color: #b00020; }
     .topbar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
     .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .history-box, .course-box { max-height: 320px; overflow-y: auto; border: 1px solid #e5e5e5; border-radius: 4px; padding: 8px; background: #fafafa; }
-    .history-item, .course-item { border-bottom: 1px solid #ececec; padding: 8px 0; }
-    .history-item:last-child, .course-item:last-child { border-bottom: none; }
+    .history-box, .course-box, .task-box { max-height: 320px; overflow-y: auto; border: 1px solid #e5e5e5; border-radius: 4px; padding: 8px; background: #fafafa; }
+    .history-item, .course-item, .task-item { border-bottom: 1px solid #ececec; padding: 8px 0; }
+    .history-item:last-child, .course-item:last-child, .task-item:last-child { border-bottom: none; }
     @media (max-width: 960px) { .main-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -55,6 +55,14 @@
       <div id="course-list" class="course-box"></div>
     </section>
   </div>
+
+  <section id="section-today-tasks">
+    <h2>今天待发送</h2>
+    <button id="generate-today-tasks">生成今天任务</button>
+    <button id="refresh-today-tasks">刷新任务列表</button>
+    <div id="today-task-result" class="result"></div>
+    <div id="today-task-list" class="task-box"></div>
+  </section>
 
   <section id="section-history">
     <h2>历史培训（可滚动）</h2>
