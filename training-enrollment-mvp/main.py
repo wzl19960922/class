@@ -1,11 +1,15 @@
 import hashlib
 import io
+import json
 import os
 import re
 import sqlite3
 import zipfile
 import base64
 import logging
+import urllib.error
+import urllib.parse
+import urllib.request
 from logging.handlers import RotatingFileHandler
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -77,12 +81,18 @@ def initialize_database() -> None:
                 start_date TEXT,
                 end_date TEXT,
                 location_text TEXT,
+                training_goal TEXT,
                 notice_filename TEXT,
                 notice_sha256 TEXT,
                 created_at TEXT
             )
             """
         )
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(training_session)").fetchall()
+        }
+        if "training_goal" not in columns:
+            conn.execute("ALTER TABLE training_session ADD COLUMN training_goal TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS enrollment (
@@ -239,6 +249,7 @@ def create_session():
     start_date = request.form.get("start_date", "").strip()
     end_date = request.form.get("end_date", "").strip()
     location_text = request.form.get("location_text", "").strip()
+    training_goal = request.form.get("training_goal", "").strip()
 
     notice_file = request.files.get("notice_file")
     notice_filename = None
@@ -252,14 +263,15 @@ def create_session():
         cursor = conn.execute(
             """
             INSERT INTO training_session
-            (title, start_date, end_date, location_text, notice_filename, notice_sha256, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (title, start_date, end_date, location_text, training_goal, notice_filename, notice_sha256, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 title,
                 start_date,
                 end_date,
                 location_text,
+                training_goal,
                 notice_filename,
                 notice_sha256,
                 created_at,
@@ -278,7 +290,7 @@ def get_session(session_id: int):
         row = conn.execute(
             """
             SELECT session_id, title, start_date, end_date, location_text,
-                   notice_filename, notice_sha256, created_at
+                   training_goal, notice_filename, notice_sha256, created_at
             FROM training_session
             WHERE session_id = ?
             """,
@@ -300,6 +312,7 @@ def update_session():
     start_date = request.form.get("start_date", "").strip()
     end_date = request.form.get("end_date", "").strip()
     location_text = request.form.get("location_text", "").strip()
+    training_goal = request.form.get("training_goal", "").strip()
 
     with get_connection() as conn:
         existing = conn.execute(
@@ -323,7 +336,7 @@ def update_session():
         conn.execute(
             """
             UPDATE training_session
-            SET title = ?, start_date = ?, end_date = ?, location_text = ?,
+            SET title = ?, start_date = ?, end_date = ?, location_text = ?, training_goal = ?,
                 notice_filename = ?, notice_sha256 = ?
             WHERE session_id = ?
             """,
@@ -332,6 +345,7 @@ def update_session():
                 start_date,
                 end_date,
                 location_text,
+                training_goal,
                 notice_filename,
                 notice_sha256,
                 session_id,
@@ -350,6 +364,125 @@ def resolve_session_id(session_id_value: Optional[str]) -> Optional[int]:
         except ValueError:
             return None
     return LATEST_SESSION_ID
+
+
+def extract_notice_text(file_path: str) -> str:
+    suffix = Path(file_path).suffix.lower()
+    if suffix == ".docx":
+        doc = Document(file_path)
+        lines: List[str] = []
+        for p in doc.paragraphs:
+            text = (p.text or "").strip()
+            if text:
+                lines.append(text)
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = " | ".join((cell.text or "").strip() for cell in row.cells if (cell.text or "").strip())
+                if row_text:
+                    lines.append(row_text)
+        return "\n".join(lines)
+
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
+        return handle.read()
+
+
+def baidu_get_access_token(api_key: str, secret_key: str) -> str:
+    token_url = "https://aip.baidubce.com/oauth/2.0/token"
+    payload = urllib.parse.urlencode(
+        {
+            "grant_type": "client_credentials",
+            "client_id": api_key,
+            "client_secret": secret_key,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(token_url, data=payload, method="POST")
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        body = resp.read().decode("utf-8")
+    data = json.loads(body)
+    token = data.get("access_token")
+    if not token:
+        raise ValueError(data.get("error_description") or "百度云鉴权失败，请检查 API Key / Secret Key")
+    return token
+
+
+def parse_json_from_text(text: str) -> Dict[str, str]:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
+        cleaned = re.sub(r"```$", "", cleaned).strip()
+    parsed = json.loads(cleaned)
+    if not isinstance(parsed, dict):
+        raise ValueError("模型返回格式不是 JSON 对象")
+    return {
+        "title": str(parsed.get("title", "")).strip(),
+        "start_date": str(parsed.get("start_date", "")).strip(),
+        "end_date": str(parsed.get("end_date", "")).strip(),
+        "location_text": str(parsed.get("location_text", "")).strip(),
+        "training_goal": str(parsed.get("training_goal", "")).strip(),
+    }
+
+
+def parse_notice_with_baidu_llm(notice_text: str, api_key: str, secret_key: str) -> Dict[str, str]:
+    token = baidu_get_access_token(api_key, secret_key)
+    endpoint = f"https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/ernie_speed?access_token={token}"
+    prompt = (
+        "你是信息抽取助手。请从以下培训通知文本提取字段，并且只输出 JSON，不要输出其它内容。"
+        "\n字段：title(培训班名称),start_date(YYYY-MM-DD),end_date(YYYY-MM-DD),location_text(培训地点),training_goal(培训目标)。"
+        "\n若某项缺失填空字符串。\n\n通知文本：\n"
+        f"{notice_text[:12000]}"
+    )
+    body = json.dumps(
+        {
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.01,
+            "top_p": 0.8,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=40) as resp:
+        raw = resp.read().decode("utf-8")
+    payload = json.loads(raw)
+    if payload.get("error_msg"):
+        raise ValueError(payload.get("error_msg"))
+
+    result_text = payload.get("result", "")
+    return parse_json_from_text(result_text)
+
+
+@app.route("/api/session/parse_notice", methods=["POST"])
+def parse_notice_api():
+    notice_file = request.files.get("notice_file")
+    if not notice_file or not notice_file.filename:
+        return json_response(False, error="请先选择通知文件。")
+
+    suffix = Path(notice_file.filename).suffix.lower()
+    if suffix not in {".docx", ".txt"}:
+        return json_response(False, error="目前仅支持 .docx 或 .txt 通知文件解析。")
+
+    api_key = request.form.get("baidu_api_key", "").strip()
+    secret_key = request.form.get("baidu_secret_key", "").strip()
+    if not api_key or not secret_key:
+        return json_response(False, error="请填写百度云 API Key 与 Secret Key。")
+
+    _, file_path = save_upload(notice_file)
+    try:
+        notice_text = extract_notice_text(file_path)
+        if not notice_text.strip():
+            return json_response(False, error="通知文件未读取到有效文本，请检查文档内容。")
+        parsed = parse_notice_with_baidu_llm(notice_text, api_key, secret_key)
+        return json_response(True, parsed)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        app.logger.exception("Baidu parse HTTP error: %s", detail)
+        return json_response(False, error=f"百度云接口调用失败：{detail[:300] or exc.reason}")
+    except Exception as exc:
+        app.logger.exception("Parse notice failed")
+        return json_response(False, error=f"解析失败：{exc}")
 
 
 def import_excel(file_path: str, source_file: str, session_id: int) -> Dict[str, Any]:
@@ -1040,6 +1173,7 @@ def session_history():
                 ts.start_date,
                 ts.end_date,
                 ts.location_text,
+                ts.training_goal,
                 ts.created_at,
                 COUNT(e.enrollment_id) AS enrollment_count
             FROM training_session ts

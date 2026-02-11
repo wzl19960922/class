@@ -91,8 +91,23 @@
         <input type="date" id="new-end-date" />
         <label>地点</label>
         <input type="text" id="new-location" />
+        <label>培训目标</label>
+        <input type="text" id="new-training-goal" />
         <label>通知文件（可选）</label>
         <input type="file" id="new-notice" />
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:flex-end;">
+          <div>
+            <label>百度云 API Key（临时输入）</label>
+            <input type="text" id="baidu-api-key" placeholder="请输入 API Key" />
+          </div>
+          <div>
+            <label>百度云 Secret Key（临时输入）</label>
+            <input type="text" id="baidu-secret-key" placeholder="请输入 Secret Key" />
+          </div>
+          <div>
+            <button id="parse-notice-btn" type="button">解析通知并填充</button>
+          </div>
+        </div>
         <div class="modal-actions">
           <button id="create-session">创建培训班</button>
         </div>
@@ -141,6 +156,8 @@
         <input type="date" id="session-edit-end" />
         <label>地点</label>
         <input type="text" id="session-edit-location" />
+        <label>培训目标</label>
+        <input type="text" id="session-edit-training-goal" />
         <label>重新上传通知文件（可选）</label>
         <input type="file" id="session-edit-notice" />
         <div class="modal-actions">

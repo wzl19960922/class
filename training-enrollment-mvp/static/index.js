@@ -49,7 +49,10 @@ function resetAddTrainingModal() {
   document.getElementById("new-start-date").value = "";
   document.getElementById("new-end-date").value = "";
   document.getElementById("new-location").value = "";
+  document.getElementById("new-training-goal").value = "";
   document.getElementById("new-notice").value = "";
+  document.getElementById("baidu-api-key").value = "";
+  document.getElementById("baidu-secret-key").value = "";
   document.getElementById("new-course-word").value = "";
   document.getElementById("new-enrollment-file").value = "";
   newSessionResult.classList.add("hidden");
@@ -112,6 +115,7 @@ async function fetchHistory() {
         <div><strong>#${item.session_id} ${item.title || "未命名培训班"}</strong></div>
         <div>日期：${item.start_date || ""} ~ ${item.end_date || ""}</div>
         <div>地点：${item.location_text || ""}</div>
+        <div>培训目标：${item.training_goal || ""}</div>
         <div>报名人次：${item.enrollment_count || 0}</div>
         <button data-action="edit-session" data-session-id="${item.session_id}">修改</button>
       </div>
@@ -133,6 +137,7 @@ async function createSession() {
   formData.append("start_date", document.getElementById("new-start-date").value.trim());
   formData.append("end_date", document.getElementById("new-end-date").value.trim());
   formData.append("location_text", document.getElementById("new-location").value.trim());
+  formData.append("training_goal", document.getElementById("new-training-goal").value.trim());
   const notice = document.getElementById("new-notice").files[0];
   if (notice) formData.append("notice_file", notice);
 
@@ -207,6 +212,7 @@ async function editSession(sessionId) {
     document.getElementById("session-edit-start").value = isoToDateValue(data.start_date);
     document.getElementById("session-edit-end").value = isoToDateValue(data.end_date);
     document.getElementById("session-edit-location").value = data.location_text || "";
+    document.getElementById("session-edit-training-goal").value = data.training_goal || "";
     document.getElementById("session-edit-notice").value = "";
     document.getElementById("session-edit-course-word").value = "";
     document.getElementById("session-edit-enrollment-file").value = "";
@@ -231,6 +237,7 @@ async function saveSessionEdit() {
   formData.append("start_date", document.getElementById("session-edit-start").value.trim());
   formData.append("end_date", document.getElementById("session-edit-end").value.trim());
   formData.append("location_text", document.getElementById("session-edit-location").value.trim());
+  formData.append("training_goal", document.getElementById("session-edit-training-goal").value.trim());
   const notice = document.getElementById("session-edit-notice").files[0];
   if (notice) formData.append("notice_file", notice);
 
@@ -240,6 +247,44 @@ async function saveSessionEdit() {
     await fetchHistory();
   } catch (error) {
     sessionEditResult.innerHTML = `<p class="error">保存失败：${error.message}</p>`;
+  }
+}
+
+async function parseNoticeAndFill() {
+  const notice = document.getElementById("new-notice").files[0];
+  if (!notice) {
+    showResult(newSessionResult, "请先选择通知文件，再进行解析。", true);
+    return;
+  }
+  const apiKey = document.getElementById("baidu-api-key").value.trim();
+  const secretKey = document.getElementById("baidu-secret-key").value.trim();
+  if (!apiKey || !secretKey) {
+    showResult(newSessionResult, "请先输入百度云 API Key 与 Secret Key。", true);
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("notice_file", notice);
+  formData.append("baidu_api_key", apiKey);
+  formData.append("baidu_secret_key", secretKey);
+
+  try {
+    showResult(newSessionResult, "正在解析通知文件，请稍候...");
+    const data = await handleResponse(await fetch("/api/session/parse_notice", { method: "POST", body: formData }));
+    if (data.title) document.getElementById("new-title").value = data.title;
+    if (data.start_date) document.getElementById("new-start-date").value = data.start_date;
+    if (data.end_date) document.getElementById("new-end-date").value = data.end_date;
+    if (data.location_text) document.getElementById("new-location").value = data.location_text;
+    if (data.training_goal) document.getElementById("new-training-goal").value = data.training_goal;
+    showResult(
+      newSessionResult,
+      `<p>解析成功，已自动填充字段。</p>
+       <p>培训标题：${data.title || ""}</p>
+       <p>培训时间：${data.start_date || ""}${data.end_date ? ` ~ ${data.end_date}` : ""}</p>
+       <p>培训目标：${data.training_goal || ""}</p>`
+    );
+  } catch (error) {
+    showResult(newSessionResult, `通知解析失败：${error.message}`, true);
   }
 }
 
@@ -394,6 +439,7 @@ function bindEvents() {
   document.getElementById("open-add-training").addEventListener("click", openAddTrainingModal);
   document.getElementById("close-add-training").addEventListener("click", closeAddTrainingModal);
   document.getElementById("create-session").addEventListener("click", createSession);
+  document.getElementById("parse-notice-btn").addEventListener("click", parseNoticeAndFill);
   document.getElementById("import-course-word").addEventListener("click", importCourseWord);
   document.getElementById("import-enrollment").addEventListener("click", importEnrollment);
 
