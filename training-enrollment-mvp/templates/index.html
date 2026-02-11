@@ -20,6 +20,10 @@
     .history-box, .course-box, .task-box { max-height: 320px; overflow-y: auto; border: 1px solid #e5e5e5; border-radius: 4px; padding: 8px; background: #fafafa; }
     .history-item, .course-item, .task-item { border-bottom: 1px solid #ececec; padding: 8px 0; }
     .history-item:last-child, .course-item:last-child, .task-item:last-child { border-bottom: none; }
+    .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: center; justify-content: center; }
+    .modal-mask.show { display: flex; }
+    .modal-panel { width: 540px; max-width: 90vw; background: #fff; border-radius: 8px; padding: 16px; }
+    .modal-title { margin-top: 0; }
     @media (max-width: 960px) { .main-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -42,17 +46,34 @@
     </section>
 
     <section id="section-course">
-      <h2>课程模块（Word 课程表）</h2>
+      <h2>课程模块（Word + CRUD）</h2>
       <label>绑定期次 session_id（可选）</label>
       <input type="text" id="course-session-id" placeholder="例如 12" />
       <label>上传 Word 课程表（.docx）</label>
       <input type="file" id="course-word-file" accept=".docx" />
       <div>
         <button id="import-course">读取并入库</button>
+      </div>
+
+      <h3>手工新增课程</h3>
+      <label>课程名称</label>
+      <input type="text" id="course-title" />
+      <label>老师</label>
+      <input type="text" id="course-teacher" />
+      <label>开始时间（YYYY-MM-DDTHH:MM:SS）</label>
+      <input type="text" id="course-start-at" placeholder="2026-02-11T08:30:00" />
+      <label>结束时间（YYYY-MM-DDTHH:MM:SS）</label>
+      <input type="text" id="course-end-at" placeholder="2026-02-11T09:30:00" />
+      <label>地点</label>
+      <input type="text" id="course-location" />
+      <div>
+        <button id="save-course">保存课程</button>
+        <button id="reset-course-form">清空表单</button>
+        <button id="open-course-list">查看历史课程（弹窗）</button>
         <button id="refresh-courses">刷新课程列表</button>
       </div>
       <div id="course-result" class="result"></div>
-      <div id="course-list" class="course-box"></div>
+
     </section>
   </div>
 
@@ -69,6 +90,60 @@
     <button id="refresh-history">刷新历史培训</button>
     <div id="history-list" class="history-box"></div>
   </section>
+
+
+  <div id="course-list-modal" class="modal-mask">
+    <div class="modal-panel">
+      <h3 class="modal-title">历史课程（弹窗滚动）</h3>
+      <button id="close-course-list">关闭</button>
+      <div id="course-list" class="course-box"></div>
+    </div>
+  </div>
+
+  <div id="course-edit-modal" class="modal-mask">
+    <div class="modal-panel">
+      <h3>编辑课程</h3>
+      <input type="hidden" id="course-edit-id" />
+      <label>课程名称</label>
+      <input type="text" id="course-edit-title" />
+      <label>老师</label>
+      <input type="text" id="course-edit-teacher" />
+      <label>开始时间（YYYY-MM-DDTHH:MM:SS）</label>
+      <input type="text" id="course-edit-start-at" />
+      <label>结束时间（YYYY-MM-DDTHH:MM:SS）</label>
+      <input type="text" id="course-edit-end-at" />
+      <label>地点</label>
+      <input type="text" id="course-edit-location" />
+      <label>session_id（可选）</label>
+      <input type="text" id="course-edit-session-id" />
+      <div>
+        <button id="save-course-edit">保存修改</button>
+        <button id="close-course-edit">取消</button>
+      </div>
+    </div>
+  </div>
+
+
+  <div id="session-edit-modal" class="modal-mask">
+    <div class="modal-panel">
+      <h3 class="modal-title">编辑历史培训</h3>
+      <input type="hidden" id="session-edit-id" />
+      <label>培训标题</label>
+      <input type="text" id="session-edit-title" />
+      <label>开始日期</label>
+      <input type="text" id="session-edit-start-date" placeholder="YYYY-MM-DD" />
+      <label>结束日期</label>
+      <input type="text" id="session-edit-end-date" placeholder="YYYY-MM-DD" />
+      <label>地点</label>
+      <input type="text" id="session-edit-location" />
+      <label>通知文件（可选，重新上传覆盖）</label>
+      <input type="file" id="session-edit-notice" />
+      <div>
+        <button id="save-session-edit">保存修改</button>
+        <button id="close-session-edit">取消</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/index.js"></script>
 </body>

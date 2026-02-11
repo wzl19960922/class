@@ -199,6 +199,13 @@ def json_response(ok: bool, data: Any = None, error: Optional[str] = None):
     return jsonify({"ok": ok, "data": data, "error": error})
 
 
+@app.errorhandler(Exception)
+def handle_exception(exc: Exception):
+    if request.path.startswith("/api/"):
+        return json_response(False, error=f"服务异常: {exc}"), 500
+    raise exc
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -769,6 +776,92 @@ def list_courses():
             """
         ).fetchall()
     return json_response(True, [dict(row) for row in rows])
+
+
+@app.route("/api/course/create", methods=["POST"])
+def create_course():
+    payload = request.get_json(silent=True) or {}
+    title = str(payload.get("title", "")).strip()
+    if not title:
+        return json_response(False, error="课程名称不能为空。")
+
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO course (title, teacher, start_at, end_at, location, session_id, source_file, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                title,
+                (payload.get("teacher") or "").strip() or None,
+                (payload.get("start_at") or "").strip() or None,
+                (payload.get("end_at") or "").strip() or None,
+                (payload.get("location") or "").strip() or None,
+                int(payload["session_id"]) if str(payload.get("session_id", "")).isdigit() else None,
+                "manual",
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+    return json_response(True, {"course_id": cursor.lastrowid})
+
+
+@app.route("/api/course/<int:course_id>")
+def get_course(course_id: int):
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT course_id, title, teacher, start_at, end_at, location, session_id, source_file, created_at
+            FROM course WHERE course_id = ?
+            """,
+            (course_id,),
+        ).fetchone()
+    if not row:
+        return json_response(False, error="课程不存在。")
+    return json_response(True, dict(row))
+
+
+@app.route("/api/course/update", methods=["POST"])
+def update_course():
+    payload = request.get_json(silent=True) or {}
+    course_id = payload.get("course_id")
+    if not isinstance(course_id, int):
+        return json_response(False, error="course_id 非法。")
+
+    title = str(payload.get("title", "")).strip()
+    if not title:
+        return json_response(False, error="课程名称不能为空。")
+
+    with get_connection() as conn:
+        row = conn.execute("SELECT course_id FROM course WHERE course_id = ?", (course_id,)).fetchone()
+        if not row:
+            return json_response(False, error="课程不存在。")
+
+        conn.execute(
+            """
+            UPDATE course
+            SET title = ?, teacher = ?, start_at = ?, end_at = ?, location = ?, session_id = ?
+            WHERE course_id = ?
+            """,
+            (
+                title,
+                (payload.get("teacher") or "").strip() or None,
+                (payload.get("start_at") or "").strip() or None,
+                (payload.get("end_at") or "").strip() or None,
+                (payload.get("location") or "").strip() or None,
+                int(payload["session_id"]) if str(payload.get("session_id", "")).isdigit() else None,
+                course_id,
+            ),
+        )
+    return json_response(True, {"course_id": course_id})
+
+
+@app.route("/api/course/<int:course_id>/delete", methods=["POST"])
+def delete_course(course_id: int):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM message_task WHERE course_id = ?", (course_id,))
+        conn.execute("DELETE FROM survey_response WHERE course_id = ?", (course_id,))
+        conn.execute("DELETE FROM course WHERE course_id = ?", (course_id,))
+    return json_response(True, {"course_id": course_id})
 
 
 @app.route("/api/tasks/generate_today", methods=["POST"])
