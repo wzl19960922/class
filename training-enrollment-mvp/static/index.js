@@ -57,6 +57,7 @@ async function fetchHistory() {
             <div>地点：${item.location_text || ""}</div>
             <div>报名人次：${item.enrollment_count}</div>
             <div>创建时间：${item.created_at || ""}</div>
+            <div><a href="/add?session_id=${item.session_id}">修改信息/重新上传材料</a></div>
           </div>
         `
       )

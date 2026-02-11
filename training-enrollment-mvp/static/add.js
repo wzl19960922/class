@@ -1,6 +1,8 @@
 const sessionResult = document.getElementById("session-result");
 const importResult = document.getElementById("import-result");
 const importSessionHint = document.getElementById("import-session-hint");
+const pageTitle = document.getElementById("page-title");
+const saveSessionBtn = document.getElementById("save-session");
 
 let currentSessionId = null;
 
@@ -8,6 +10,22 @@ function showResult(element, message, isError = false) {
   element.classList.remove("hidden");
   element.classList.toggle("error", isError);
   element.innerHTML = message;
+}
+
+function getQuerySessionId() {
+  const url = new URL(window.location.href);
+  const sessionId = url.searchParams.get("session_id");
+  if (!sessionId || !/^\d+$/.test(sessionId)) {
+    return null;
+  }
+  return Number(sessionId);
+}
+
+function fillSessionForm(data) {
+  document.getElementById("title").value = data.title || "";
+  document.getElementById("start_date").value = data.start_date || "";
+  document.getElementById("end_date").value = data.end_date || "";
+  document.getElementById("location_text").value = data.location_text || "";
 }
 
 async function handleResponse(response) {
@@ -18,7 +36,26 @@ async function handleResponse(response) {
   return payload.data;
 }
 
-document.getElementById("create-session").addEventListener("click", async () => {
+async function loadSessionForEdit() {
+  const querySessionId = getQuerySessionId();
+  if (!querySessionId) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/session/${querySessionId}`);
+    const data = await handleResponse(response);
+    currentSessionId = data.session_id;
+    fillSessionForm(data);
+    pageTitle.textContent = `编辑培训 #${currentSessionId}`;
+    saveSessionBtn.textContent = "保存修改";
+    importSessionHint.textContent = `当前绑定期次 session_id: ${currentSessionId}`;
+  } catch (error) {
+    showResult(sessionResult, `加载期次失败：${error.message}`, true);
+  }
+}
+
+saveSessionBtn.addEventListener("click", async () => {
   const formData = new FormData();
   formData.append("title", document.getElementById("title").value.trim());
   formData.append("start_date", document.getElementById("start_date").value);
@@ -31,10 +68,19 @@ document.getElementById("create-session").addEventListener("click", async () => 
   }
 
   try {
-    const response = await fetch("/api/session/create", { method: "POST", body: formData });
+    let response;
+    if (currentSessionId) {
+      formData.append("session_id", String(currentSessionId));
+      response = await fetch("/api/session/update", { method: "POST", body: formData });
+    } else {
+      response = await fetch("/api/session/create", { method: "POST", body: formData });
+    }
+
     const data = await handleResponse(response);
     currentSessionId = data.session_id;
-    showResult(sessionResult, `期次创建成功，session_id: ${currentSessionId}`);
+    saveSessionBtn.textContent = "保存修改";
+    pageTitle.textContent = `编辑培训 #${currentSessionId}`;
+    showResult(sessionResult, `期次保存成功，session_id: ${currentSessionId}`);
     importSessionHint.textContent = `当前绑定期次 session_id: ${currentSessionId}`;
   } catch (error) {
     showResult(sessionResult, error.message, true);
@@ -83,3 +129,5 @@ document.getElementById("import-enrollment").addEventListener("click", async () 
     showResult(importResult, error.message, true);
   }
 });
+
+loadSessionForEdit();

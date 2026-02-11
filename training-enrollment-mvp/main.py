@@ -192,6 +192,77 @@ def create_session():
     return json_response(True, {"session_id": session_id})
 
 
+@app.route("/api/session/<int:session_id>")
+def get_session(session_id: int):
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT session_id, title, start_date, end_date, location_text,
+                   notice_filename, notice_sha256, created_at
+            FROM training_session
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+    if not row:
+        return json_response(False, error="期次不存在。")
+    return json_response(True, dict(row))
+
+
+@app.route("/api/session/update", methods=["POST"])
+def update_session():
+    session_id_text = request.form.get("session_id", "").strip()
+    if not session_id_text.isdigit():
+        return json_response(False, error="session_id 非法。")
+
+    session_id = int(session_id_text)
+    title = request.form.get("title", "").strip()
+    start_date = request.form.get("start_date", "").strip()
+    end_date = request.form.get("end_date", "").strip()
+    location_text = request.form.get("location_text", "").strip()
+
+    with get_connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT notice_filename, notice_sha256
+            FROM training_session
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        if not existing:
+            return json_response(False, error="期次不存在。")
+
+        notice_filename = existing["notice_filename"]
+        notice_sha256 = existing["notice_sha256"]
+        notice_file = request.files.get("notice_file")
+        if notice_file and notice_file.filename:
+            notice_filename, file_path = save_upload(notice_file)
+            notice_sha256 = compute_sha256(file_path)
+
+        conn.execute(
+            """
+            UPDATE training_session
+            SET title = ?, start_date = ?, end_date = ?, location_text = ?,
+                notice_filename = ?, notice_sha256 = ?
+            WHERE session_id = ?
+            """,
+            (
+                title,
+                start_date,
+                end_date,
+                location_text,
+                notice_filename,
+                notice_sha256,
+                session_id,
+            ),
+        )
+
+    global LATEST_SESSION_ID
+    LATEST_SESSION_ID = session_id
+    return json_response(True, {"session_id": session_id})
+
+
 def resolve_session_id(session_id_value: Optional[str]) -> Optional[int]:
     if session_id_value:
         try:
