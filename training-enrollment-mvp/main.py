@@ -148,6 +148,11 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/add")
+def add_page():
+    return render_template("add.html")
+
+
 @app.route("/api/session/create", methods=["POST"])
 def create_session():
     title = request.form.get("title", "").strip()
@@ -371,7 +376,7 @@ def fetch_yearly_stats(year: str) -> Dict[str, Any]:
             FROM enrollment
             JOIN person ON enrollment.person_id = person.person_id
             JOIN training_session ON enrollment.session_id = training_session.session_id
-            WHERE substr(training_session.start_date, 1, 4) = ?
+            WHERE COALESCE(NULLIF(substr(training_session.start_date, 1, 4), ""), substr(enrollment.enrolled_at, 1, 4)) = ?
             """,
             (year,),
         ).fetchall()
@@ -400,6 +405,30 @@ def fetch_yearly_stats(year: str) -> Dict[str, Any]:
     }
 
 
+
+
+@app.route("/api/session/history")
+def session_history():
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                ts.session_id,
+                ts.title,
+                ts.start_date,
+                ts.end_date,
+                ts.location_text,
+                ts.created_at,
+                COUNT(e.enrollment_id) AS enrollment_count
+            FROM training_session ts
+            LEFT JOIN enrollment e ON e.session_id = ts.session_id
+            GROUP BY ts.session_id
+            ORDER BY ts.session_id DESC
+            """
+        ).fetchall()
+
+    return json_response(True, [dict(row) for row in rows])
+
 @app.route("/api/stats/year")
 def stats_year():
     year = request.args.get("year", "").strip()
@@ -419,7 +448,7 @@ def build_exports(year: str) -> io.BytesIO:
             FROM enrollment
             JOIN person ON enrollment.person_id = person.person_id
             JOIN training_session ON enrollment.session_id = training_session.session_id
-            WHERE substr(training_session.start_date, 1, 4) = ?
+            WHERE COALESCE(NULLIF(substr(training_session.start_date, 1, 4), ""), substr(enrollment.enrolled_at, 1, 4)) = ?
             """,
             (year,),
         ).fetchall()
