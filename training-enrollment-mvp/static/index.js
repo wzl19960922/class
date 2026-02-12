@@ -139,67 +139,47 @@ async function createSession() {
   formData.append("training_goal", document.getElementById("new-training-goal").value.trim());
   const notice = document.getElementById("new-notice").files[0];
   if (notice) formData.append("notice_file", notice);
+  const courseWord = document.getElementById("new-course-word").files[0];
+  const enrollmentFile = document.getElementById("new-enrollment-file").files[0];
 
   try {
     const data = await handleResponse(await fetch("/api/session/create", { method: "POST", body: formData }));
     currentSessionId = data.session_id;
-    showResult(newSessionResult, `<p>培训班保存成功，session_id：<strong>${currentSessionId}</strong></p>`);
+    let resultHtml = `<p>培训班保存成功，session_id：<strong>${currentSessionId}</strong></p>`;
+
+    if (courseWord) {
+      const courseForm = new FormData();
+      courseForm.append("session_id", String(currentSessionId));
+      courseForm.append("word_file", courseWord);
+      const courseData = await handleResponse(await fetch("/api/course/import", { method: "POST", body: courseForm }));
+      resultHtml += `<p>课程表导入成功：新增 ${courseData.imported_courses} 条。</p>`;
+      showResult(newCourseResult, `<p>课程表已在保存时导入：新增 ${courseData.imported_courses} 条。</p>`);
+    } else {
+      showResult(newCourseResult, "未上传课程表，已跳过导入。");
+    }
+
+    if (enrollmentFile) {
+      const enrollmentForm = new FormData();
+      enrollmentForm.append("session_id", String(currentSessionId));
+      enrollmentForm.append("excel_file", enrollmentFile);
+      const enrollmentData = await handleResponse(await fetch("/api/enrollment/import", { method: "POST", body: enrollmentForm }));
+      const errors = (enrollmentData.invalid_rows || []).map((it) => `<li>sheet:${it.sheet} 行:${it.row} 原因:${it.reason}</li>`).join("");
+      resultHtml += `<p>人员导入完成：有效行 ${enrollmentData.valid_rows}，新增学员 ${enrollmentData.new_person_count}，新增报名 ${enrollmentData.new_enrollment_count}。</p>`;
+      showResult(newEnrollmentResult, `
+        <p>学员名单已在保存时导入：sheet数 ${enrollmentData.sheet_count}，有效行 ${enrollmentData.valid_rows}，新增学员 ${enrollmentData.new_person_count}，新增报名 ${enrollmentData.new_enrollment_count}。</p>
+        <ul>${errors || "<li>无异常行</li>"}</ul>
+      `);
+    } else {
+      showResult(newEnrollmentResult, "未上传学员名单，已跳过导入。");
+    }
+
+    showResult(newSessionResult, resultHtml);
     newCourseSessionTip.textContent = `已绑定培训班 session_id：${currentSessionId}`;
     newEnrollmentSessionTip.textContent = `已绑定培训班 session_id：${currentSessionId}`;
     await fetchHistory();
+    await fetchTodayTasks();
   } catch (error) {
     showResult(newSessionResult, `创建失败：${error.message}`, true);
-  }
-}
-
-async function importCourseWord() {
-  if (!currentSessionId) {
-    showResult(newCourseResult, "请先完成第①步创建培训班。", true);
-    return;
-  }
-  const file = document.getElementById("new-course-word").files[0];
-  if (!file) {
-    showResult(newCourseResult, "请先选择 Word 课程表文件。", true);
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append("session_id", String(currentSessionId));
-  formData.append("word_file", file);
-
-  try {
-    const data = await handleResponse(await fetch("/api/course/import", { method: "POST", body: formData }));
-    showResult(newCourseResult, `<p>课程导入成功：新增 ${data.imported_courses} 条。</p>`);
-  } catch (error) {
-    showResult(newCourseResult, `课程导入失败：${error.message}`, true);
-  }
-}
-
-async function importEnrollment() {
-  if (!currentSessionId) {
-    showResult(newEnrollmentResult, "请先完成第①步创建培训班。", true);
-    return;
-  }
-  const file = document.getElementById("new-enrollment-file").files[0];
-  if (!file) {
-    showResult(newEnrollmentResult, "请先选择报名 Excel 文件。", true);
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append("session_id", String(currentSessionId));
-  formData.append("excel_file", file);
-
-  try {
-    const data = await handleResponse(await fetch("/api/enrollment/import", { method: "POST", body: formData }));
-    const errors = (data.invalid_rows || []).map((it) => `<li>sheet:${it.sheet} 行:${it.row} 原因:${it.reason}</li>`).join("");
-    showResult(newEnrollmentResult, `
-      <p>导入完成：sheet数 ${data.sheet_count}，有效行 ${data.valid_rows}，新增学员 ${data.new_person_count}，新增报名 ${data.new_enrollment_count}。</p>
-      <ul>${errors || "<li>无异常行</li>"}</ul>
-    `);
-    await fetchHistory();
-  } catch (error) {
-    showResult(newEnrollmentResult, `人员导入失败：${error.message}`, true);
   }
 }
 
@@ -354,7 +334,7 @@ async function fetchTodayTasks() {
     const query = mapApiKey ? `?map_api_key=${encodeURIComponent(mapApiKey)}` : "";
     const tasks = await handleResponse(await fetch(`/api/tasks/today${query}`));
     if (!tasks.length) {
-      todayTaskList.innerHTML = "<p>今天暂无课后待发送任务。</p>";
+      todayTaskList.innerHTML = "<p>暂无近期课程。</p>";
       return;
     }
 
@@ -386,16 +366,35 @@ async function fetchTodayTasks() {
       const safeContent = (item.content || "").replace(/"/g, "&quot;");
       return `
         <div class="task-item">
-          <div><strong>${item.course_title || "课程"}</strong>（课后）</div>
-          <div>计划发送：${item.planned_at}</div>
-          <div>内容：${item.content || ""}</div>
-          <div>状态：${statusText}</div>
-          ${surveyHtml}
-          ${mapHtml}
-          ${qrHtml}
-          <div>
-            <button data-action="copy-task" data-task-id="${item.task_id}" data-content="${safeContent}">复制文案</button>
-            <button data-action="mark-sent" data-task-id="${item.task_id}">标记已发送</button>
+          <div class="task-row">
+            <div class="task-panel">
+              <div><strong>${item.course_title || "课程"}</strong></div>
+              <div>讲师：${item.course_teacher || ""}</div>
+              <div>时间：${item.start_at || ""} ~ ${item.end_at || ""}</div>
+              <div>状态：${statusText}</div>
+              ${surveyHtml}
+              ${mapHtml}
+              ${qrHtml}
+              <div style="margin-top:8px;">
+                <button data-action="mark-sent" data-task-id="${item.task_id || ""}">标记已发送</button>
+              </div>
+            </div>
+            <div class="task-panel">
+              <div><strong>可发送内容</strong></div>
+              <label>发送文案</label>
+              <textarea id="task-content-${item.course_id}" style="width:100%;height:92px;">${item.content || ""}</textarea>
+              <label>课程名称</label>
+              <input type="text" id="course-title-${item.course_id}" value="${item.course_title || ""}" style="width:100%;" />
+              <label>讲师</label>
+              <input type="text" id="course-teacher-${item.course_id}" value="${item.course_teacher || ""}" style="width:100%;" />
+              <label>地点</label>
+              <input type="text" id="course-location-${item.course_id}" value="${item.course_location || ""}" style="width:100%;" />
+              <div style="margin-top:8px;">
+                <button data-action="save-course" data-course-id="${item.course_id}">保存课程信息</button>
+                <button data-action="save-task-content" data-course-id="${item.course_id}">保存发送内容</button>
+                <button data-action="copy-task" data-course-id="${item.course_id}">复制文案</button>
+              </div>
+            </div>
           </div>
         </div>`;
     }).join("");
@@ -433,6 +432,56 @@ async function copyTaskContent(content) {
   }
 }
 
+async function saveCourseInline(courseId) {
+  const title = document.getElementById(`course-title-${courseId}`)?.value?.trim() || "";
+  if (!title) {
+    alert("课程名称不能为空");
+    return;
+  }
+  const payload = {
+    course_id: Number(courseId),
+    title,
+    teacher: document.getElementById(`course-teacher-${courseId}`)?.value?.trim() || "",
+    location: document.getElementById(`course-location-${courseId}`)?.value?.trim() || "",
+    start_at: "",
+    end_at: "",
+    session_id: "",
+  };
+
+  try {
+    const old = await handleResponse(await fetch(`/api/course/${courseId}`));
+    payload.start_at = old.start_at || "";
+    payload.end_at = old.end_at || "";
+    payload.session_id = old.session_id || "";
+    await handleResponse(await fetch("/api/course/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }));
+    await fetchTodayTasks();
+  } catch (error) {
+    alert(`保存课程失败：${error.message}`);
+  }
+}
+
+async function saveTaskContentInline(courseId) {
+  const content = document.getElementById(`task-content-${courseId}`)?.value?.trim() || "";
+  if (!content) {
+    alert("发送文案不能为空");
+    return;
+  }
+  try {
+    await handleResponse(await fetch("/api/tasks/upsert_post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ course_id: Number(courseId), content }),
+    }));
+    await fetchTodayTasks();
+  } catch (error) {
+    alert(`保存发送内容失败：${error.message}`);
+  }
+}
+
 function bindEvents() {
   document.getElementById("fetch-stats").addEventListener("click", fetchStats);
   document.getElementById("export-year").addEventListener("click", () => {
@@ -448,8 +497,6 @@ function bindEvents() {
   document.getElementById("close-add-training").addEventListener("click", closeAddTrainingModal);
   document.getElementById("create-session").addEventListener("click", createSession);
   document.getElementById("parse-notice-btn").addEventListener("click", parseNoticeAndFill);
-  document.getElementById("import-course-word").addEventListener("click", importCourseWord);
-  document.getElementById("import-enrollment").addEventListener("click", importEnrollment);
 
   document.getElementById("refresh-history").addEventListener("click", fetchHistory);
 
@@ -473,10 +520,22 @@ function bindEvents() {
     if (!button) return;
     const action = button.dataset.action;
     if (action === "mark-sent") {
-      await markTaskSent(Number(button.dataset.taskId));
+      if (!button.dataset.taskId) {
+        alert("该课程还没有生成任务，请先保存发送内容。")
+      } else {
+        await markTaskSent(Number(button.dataset.taskId));
+      }
     }
     if (action === "copy-task") {
-      await copyTaskContent(button.dataset.content || "");
+      const courseId = button.dataset.courseId;
+      const content = courseId ? (document.getElementById(`task-content-${courseId}`)?.value || "") : (button.dataset.content || "");
+      await copyTaskContent(content);
+    }
+    if (action === "save-course") {
+      await saveCourseInline(Number(button.dataset.courseId));
+    }
+    if (action === "save-task-content") {
+      await saveTaskContentInline(Number(button.dataset.courseId));
     }
   });
 }

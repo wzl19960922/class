@@ -1061,40 +1061,120 @@ def generate_today_tasks():
 
 @app.route("/api/tasks/today")
 def list_today_tasks():
-    today = date.today().isoformat()
     amap_key = request.args.get("map_api_key", "").strip()
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT mt.task_id, mt.course_id, mt.task_type, mt.planned_at, mt.content,
-                   mt.survey_link, mt.qr_data_uri, mt.status, mt.sent_at,
-                   c.title AS course_title, c.teacher AS course_teacher, c.location AS course_location,
+            SELECT c.course_id,
+                   c.title AS course_title,
+                   c.teacher AS course_teacher,
+                   c.location AS course_location,
+                   c.start_at,
+                   c.end_at,
+                   mt.task_id,
+                   mt.task_type,
+                   mt.planned_at,
+                   mt.content,
+                   mt.survey_link,
+                   mt.qr_data_uri,
+                   mt.status,
+                   mt.sent_at,
                    (
                        SELECT COUNT(1)
                        FROM survey_response sr
-                       WHERE sr.course_id = mt.course_id
+                       WHERE sr.course_id = c.course_id
                    ) AS survey_submitted_count,
                    (
                        SELECT COUNT(1)
                        FROM enrollment e
                        WHERE e.session_id = c.session_id
                    ) AS enrollment_total_count
-            FROM message_task mt
-            JOIN course c ON c.course_id = mt.course_id
-            WHERE substr(mt.planned_at, 1, 10) = ?
-              AND mt.task_type = 'post'
-            ORDER BY mt.planned_at ASC
+            FROM course c
+            LEFT JOIN message_task mt
+              ON mt.course_id = c.course_id AND mt.task_type = 'post'
+            ORDER BY COALESCE(c.end_at, c.start_at, c.created_at) DESC, c.course_id DESC
+            LIMIT 3
             """,
-            (today,),
         ).fetchall()
     result = []
     for row in rows:
         item = dict(row)
+        if not item.get("content"):
+            item["content"] = f"【课后问卷】请填写 {item.get('course_title') or '课程'} 的反馈问卷。"
+        if not item.get("planned_at"):
+            item["planned_at"] = item.get("end_at") or item.get("start_at") or ""
+        if not item.get("status"):
+            item["status"] = "pending"
+        if not item.get("survey_link"):
+            item["survey_link"] = f"http://127.0.0.1:5000/survey/{item['course_id']}"
         map_info = build_map_info(item.get("course_location", ""), amap_key)
         item["map_url"] = map_info["map_url"]
         item["geo"] = map_info["geo"]
         result.append(item)
     return json_response(True, result)
+
+
+@app.route("/api/tasks/upsert_post", methods=["POST"])
+def upsert_post_task():
+    payload = request.get_json(silent=True) or {}
+    course_id = payload.get("course_id")
+    if not isinstance(course_id, int):
+        return json_response(False, error="course_id 非法。")
+
+    content = str(payload.get("content", "")).strip()
+    if not content:
+        return json_response(False, error="发送内容不能为空。")
+
+    with get_connection() as conn:
+        course = conn.execute(
+            "SELECT course_id, start_at, end_at FROM course WHERE course_id = ?",
+            (course_id,),
+        ).fetchone()
+        if not course:
+            return json_response(False, error="课程不存在。")
+
+        planned_at = course["end_at"] or course["start_at"] or datetime.now().isoformat(timespec="seconds")
+        survey_link = f"http://127.0.0.1:5000/survey/{course_id}"
+        existing = conn.execute(
+            "SELECT task_id FROM message_task WHERE course_id = ? AND task_type = 'post' ORDER BY task_id DESC LIMIT 1",
+            (course_id,),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE message_task
+                SET content = ?, planned_at = ?, survey_link = ?, status = 'pending', sent_at = NULL
+                WHERE task_id = ?
+                """,
+                (content, planned_at, survey_link, existing["task_id"]),
+            )
+            task_id = existing["task_id"]
+        else:
+            qr_data_uri = None
+            if QR_PIL_AVAILABLE:
+                try:
+                    qr_data_uri = build_qr_data_uri(survey_link)
+                except Exception:
+                    qr_data_uri = None
+            cursor = conn.execute(
+                """
+                INSERT INTO message_task (
+                    course_id, task_type, planned_at, content, survey_link,
+                    qr_data_uri, status, created_at
+                ) VALUES (?, 'post', ?, ?, ?, ?, 'pending', ?)
+                """,
+                (
+                    course_id,
+                    planned_at,
+                    content,
+                    survey_link,
+                    qr_data_uri,
+                    datetime.now().isoformat(timespec="seconds"),
+                ),
+            )
+            task_id = cursor.lastrowid
+
+    return json_response(True, {"course_id": course_id, "task_id": task_id})
 
 
 @app.route("/api/tasks/<int:task_id>/mark_sent", methods=["POST"])

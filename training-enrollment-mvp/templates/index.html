@@ -21,6 +21,8 @@
     }
     .history-box, .task-box, .log-box { max-height: 340px; overflow-y: auto; border: 1px solid #e6e6e6; background: #fafafa; border-radius: 6px; padding: 8px; }
     .history-item, .task-item { border-bottom: 1px solid #ececec; padding: 8px 0; }
+    .task-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .task-panel { border: 1px solid #e7e7e7; border-radius: 6px; padding: 8px; background: #fff; }
     .history-item:last-child, .task-item:last-child { border-bottom: none; }
     .inline-tip { color: #666; font-size: 13px; }
     .modal-mask { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.38); z-index: 1000; }
@@ -50,7 +52,7 @@
 
     <section>
       <h2>培训班模块（含课程）</h2>
-      <div class="inline-tip">课程模块已融入培训班新增流程：新增培训班信息 → 新增课程表 → 新增人员信息。</div>
+      <div class="inline-tip">课程模块已融入培训班新增流程：新增培训班信息 → 新增课程表 → 新增人员信息 → 最后保存创建。</div>
       <div>
         <button id="open-add-training">新增培训班</button>
         <button id="refresh-history">刷新历史培训班</button>
@@ -60,7 +62,7 @@
   </div>
 
   <section>
-    <h2>今天待发送</h2>
+    <h2>近期课程待发送（最近3个）</h2>
     <label>地图 API Key（可选，高德）</label>
     <input type="text" id="map-api-key" placeholder="可留空；填写后可解析经纬度" />
     <button id="generate-today-tasks">生成今天任务</button>
@@ -106,30 +108,25 @@
             <button id="parse-notice-btn" type="button">解析通知并填充</button>
           </div>
         </div>
-        <div class="modal-actions">
-          <button id="create-session">保存并创建培训班</button>
-        </div>
+        <div class="inline-tip">先填写基础信息；课程表和人员名单在后续步骤上传，最后在第③步点击保存并创建。</div>
         <div id="new-session-result" class="result hidden"></div>
       </div>
 
       <div class="modal-block">
         <h4>② 新增课程表（Word）</h4>
-        <p id="new-course-session-tip" class="inline-tip">当前未绑定培训班，请先完成第①步。</p>
+        <p id="new-course-session-tip" class="inline-tip">请上传课程表文件（可选），保存创建时会自动导入。</p>
         <label>课程表 Word 文件（.docx）</label>
         <input type="file" id="new-course-word" accept=".docx" />
-        <div class="modal-actions">
-          <button id="import-course-word">导入课程表</button>
-        </div>
         <div id="new-course-result" class="result hidden"></div>
       </div>
 
       <div class="modal-block">
         <h4>③ 新增人员信息（报名 Excel）</h4>
-        <p id="new-enrollment-session-tip" class="inline-tip">当前未绑定培训班，请先完成第①步。</p>
+        <p id="new-enrollment-session-tip" class="inline-tip">请上传报名 Excel（可选），保存创建时会自动导入。</p>
         <label>报名 Excel 文件</label>
         <input type="file" id="new-enrollment-file" accept=".xlsx,.xls,.xlsm,.xltx,.xltm" />
         <div class="modal-actions">
-          <button id="import-enrollment">导入人员</button>
+          <button id="create-session">保存并创建培训班</button>
         </div>
         <div id="new-enrollment-result" class="result hidden"></div>
       </div>
