@@ -51,7 +51,7 @@ function resetAddTrainingModal() {
   document.getElementById("new-location").value = "";
   document.getElementById("new-training-goal").value = "";
   document.getElementById("new-notice").value = "";
-  document.getElementById("baidu-access-token").value = "";
+  document.getElementById("baidu-api-key").value = "";
   document.getElementById("new-course-word").value = "";
   document.getElementById("new-enrollment-file").value = "";
   newSessionResult.classList.add("hidden");
@@ -255,15 +255,15 @@ async function parseNoticeAndFill() {
     showResult(newSessionResult, "请先选择通知文件，再进行解析。", true);
     return;
   }
-  const accessToken = document.getElementById("baidu-access-token").value.trim();
-  if (!accessToken) {
-    showResult(newSessionResult, "请先输入百度云 Access Token。", true);
+  const apiKey = document.getElementById("baidu-api-key").value.trim();
+  if (!apiKey) {
+    showResult(newSessionResult, "请先输入百度千帆 API Key。", true);
     return;
   }
 
   const formData = new FormData();
   formData.append("notice_file", notice);
-  formData.append("baidu_access_token", accessToken);
+  formData.append("baidu_api_key", apiKey);
 
   try {
     showResult(newSessionResult, "正在解析通知文件，请稍候...");

@@ -19,6 +19,12 @@ import qrcode
 from docx import Document
 from flask import Flask, jsonify, render_template, request, send_file
 
+try:
+    import PIL  # noqa: F401
+    QR_PIL_AVAILABLE = True
+except Exception:
+    QR_PIL_AVAILABLE = False
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "training.db"
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -402,8 +408,8 @@ def parse_json_from_text(text: str) -> Dict[str, str]:
     }
 
 
-def parse_notice_with_baidu_llm(notice_text: str, access_token: str) -> Dict[str, str]:
-    endpoint = f"https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/ernie_speed?access_token={access_token}"
+def parse_notice_with_baidu_llm(notice_text: str, api_key: str) -> Dict[str, str]:
+    endpoint = "https://qianfan.baidubce.com/v2/chat/completions"
     prompt = (
         "你是信息抽取助手。请从以下培训通知文本提取字段，并且只输出 JSON，不要输出其它内容。"
         "\n字段：title(培训班名称),start_date(YYYY-MM-DD),end_date(YYYY-MM-DD),location_text(培训地点),training_goal(培训目标)。"
@@ -412,6 +418,7 @@ def parse_notice_with_baidu_llm(notice_text: str, access_token: str) -> Dict[str
     )
     body = json.dumps(
         {
+            "model": "ernie-4.5-turbo-128k",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.01,
             "top_p": 0.8,
@@ -420,16 +427,24 @@ def parse_notice_with_baidu_llm(notice_text: str, access_token: str) -> Dict[str
     req = urllib.request.Request(
         endpoint,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=40) as resp:
         raw = resp.read().decode("utf-8")
     payload = json.loads(raw)
-    if payload.get("error_msg"):
-        raise ValueError(payload.get("error_msg"))
+    if payload.get("error"):
+        message = payload["error"].get("message") or payload["error"].get("type") or "接口返回错误"
+        raise ValueError(message)
 
     result_text = payload.get("result", "")
+    if not result_text and payload.get("choices"):
+        first_choice = payload["choices"][0] if payload["choices"] else {}
+        message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
+        result_text = message.get("content", "")
     return parse_json_from_text(result_text)
 
 
@@ -443,21 +458,26 @@ def parse_notice_api():
     if suffix not in {".docx", ".txt"}:
         return json_response(False, error="目前仅支持 .docx 或 .txt 通知文件解析。")
 
-    access_token = request.form.get("baidu_access_token", "").strip()
-    if not access_token:
-        return json_response(False, error="请填写百度云 Access Token。")
+    api_key = request.form.get("baidu_api_key", "").strip()
+    if not api_key:
+        return json_response(False, error="请填写百度千帆 API Key（Bearer）。")
 
     _, file_path = save_upload(notice_file)
     try:
         notice_text = extract_notice_text(file_path)
         if not notice_text.strip():
             return json_response(False, error="通知文件未读取到有效文本，请检查文档内容。")
-        parsed = parse_notice_with_baidu_llm(notice_text, access_token)
+        parsed = parse_notice_with_baidu_llm(notice_text, api_key)
         return json_response(True, parsed)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
         app.logger.exception("Baidu parse HTTP error: %s", detail)
         return json_response(False, error=f"百度云接口调用失败：{detail[:300] or exc.reason}")
+    except ValueError as exc:
+        message = str(exc)
+        if "Access token invalid" in message or "Invalid authentication" in message:
+            return json_response(False, error="API Key 无效或已过期，请在百度千帆控制台重新获取后再试。")
+        return json_response(False, error=f"解析失败：{message}")
     except Exception as exc:
         app.logger.exception("Parse notice failed")
         return json_response(False, error=f"解析失败：{exc}")
@@ -747,6 +767,8 @@ def parse_course_rows_from_word(
 
 
 def build_qr_data_uri(text: str) -> str:
+    if not QR_PIL_AVAILABLE:
+        raise RuntimeError("未安装 Pillow（PIL），无法生成二维码。请先安装 qrcode[pil]。")
     image = qrcode.make(text)
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
@@ -758,6 +780,7 @@ def create_today_tasks() -> Dict[str, int]:
     today = date.today().isoformat()
     generated = 0
     skipped = 0
+    qr_warning_logged = False
 
     with get_connection() as conn:
         courses = conn.execute(
@@ -792,11 +815,19 @@ def create_today_tasks() -> Dict[str, int]:
                 qr_data_uri = None
                 if task_type == "post":
                     survey_link = f"http://127.0.0.1:5000/survey/{course_id}"
-                    try:
-                        qr_data_uri = build_qr_data_uri(survey_link)
-                    except Exception as exc:
+                    if not QR_PIL_AVAILABLE:
                         qr_data_uri = None
-                        app.logger.exception("QR generation failed for course_id=%s: %s", course_id, exc)
+                        if not qr_warning_logged:
+                            app.logger.error(
+                                "QR generation disabled: Pillow(PIL) missing. Install with: pip install qrcode[pil]"
+                            )
+                            qr_warning_logged = True
+                    else:
+                        try:
+                            qr_data_uri = build_qr_data_uri(survey_link)
+                        except Exception as exc:
+                            qr_data_uri = None
+                            app.logger.exception("QR generation failed for course_id=%s: %s", course_id, exc)
 
                 try:
                     conn.execute(
