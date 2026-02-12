@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>学员培训管理系统 MVP</title>
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; margin: 24px; }
+    h1, h2, h3 { margin-top: 0; }
+    section { border: 1px solid #ddd; padding: 16px; margin-bottom: 16px; border-radius: 8px; }
+    .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    .result { margin-top: 10px; background: #f7f7f7; padding: 10px; border-radius: 6px; }
+    .error { color: #b00020; }
+    label { display: block; margin: 8px 0 4px; }
+    input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"] {
+      width: 260px; max-width: 95%; padding: 6px;
+    }
+    button {
+      margin-top: 10px; margin-right: 8px; padding: 6px 14px;
+      border: 1px solid #888; border-radius: 4px; background: #f8f8f8; cursor: pointer;
+    }
+    .history-box, .task-box, .log-box { max-height: 340px; overflow-y: auto; border: 1px solid #e6e6e6; background: #fafafa; border-radius: 6px; padding: 8px; }
+    .history-item, .task-item { border-bottom: 1px solid #ececec; padding: 8px 0; }
+    .history-item:last-child, .task-item:last-child { border-bottom: none; }
+    .inline-tip { color: #666; font-size: 13px; }
+    .modal-mask { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.38); z-index: 1000; }
+    .modal-mask.show { display: flex; }
+    .modal-panel { width: 760px; max-width: 92vw; max-height: 90vh; overflow-y: auto; background: #fff; border-radius: 10px; padding: 16px; }
+    .modal-block { border: 1px solid #e5e5e5; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .modal-actions { margin-top: 10px; }
+    .hidden { display: none; }
+    @media (max-width: 960px) { .main-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>学员培训管理系统</h1>
+
+  <div class="main-grid">
+    <section>
+      <h2>主模块：年度统计与导出</h2>
+      <label>年份</label>
+      <input type="number" id="year" placeholder="2026" />
+      <div>
+        <button id="fetch-stats">统计</button>
+        <button id="export-year">导出</button>
+      </div>
+      <div id="stats-result" class="result"></div>
+    </section>
+
+    <section>
+      <h2>培训班模块（含课程）</h2>
+      <div class="inline-tip">课程模块已融入培训班新增流程：新增培训班信息 → 新增课程表 → 新增人员信息。</div>
+      <div>
+        <button id="open-add-training">新增培训班</button>
+        <button id="refresh-history">刷新历史培训班</button>
+      </div>
+      <div id="history-list" class="history-box"></div>
+    </section>
+  </div>
+
+  <section>
+    <h2>今天待发送</h2>
+    <label>地图 API Key（可选，高德）</label>
+    <input type="text" id="map-api-key" placeholder="可留空；填写后可解析经纬度" />
+    <button id="generate-today-tasks">生成今天任务</button>
+    <button id="refresh-today-tasks">刷新任务列表</button>
+    <div id="today-task-result" class="result"></div>
+    <div id="today-task-list" class="task-box"></div>
+  </section>
+
+  <section>
+    <h2>运行日志（错误排查）</h2>
+    <button id="refresh-logs">刷新日志</button>
+    <div id="log-path" class="result"></div>
+    <pre id="log-content" class="log-box"></pre>
+  </section>
+
+  <div id="add-training-modal" class="modal-mask">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h3>新增培训班</h3>
+        <button id="close-add-training">关闭</button>
+      </div>
+
+      <div class="modal-block">
+        <h4>① 新增培训班信息</h4>
+        <label>培训标题</label>
+        <input type="text" id="new-title" />
+        <label>开始日期</label>
+        <input type="date" id="new-start-date" />
+        <label>结束日期</label>
+        <input type="date" id="new-end-date" />
+        <label>地点</label>
+        <input type="text" id="new-location" />
+        <label>培训目标</label>
+        <input type="text" id="new-training-goal" />
+        <label>通知文件（可选）</label>
+        <input type="file" id="new-notice" />
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:flex-end;">
+          <div>
+            <label>百度千帆 API Key（临时输入）</label>
+            <input type="text" id="baidu-api-key" placeholder="请输入 bce-v3/..." />
+          </div>
+          <div>
+            <button id="parse-notice-btn" type="button">解析通知并填充</button>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="create-session">保存并创建培训班</button>
+        </div>
+        <div id="new-session-result" class="result hidden"></div>
+      </div>
+
+      <div class="modal-block">
+        <h4>② 新增课程表（Word）</h4>
+        <p id="new-course-session-tip" class="inline-tip">当前未绑定培训班，请先完成第①步。</p>
+        <label>课程表 Word 文件（.docx）</label>
+        <input type="file" id="new-course-word" accept=".docx" />
+        <div class="modal-actions">
+          <button id="import-course-word">导入课程表</button>
+        </div>
+        <div id="new-course-result" class="result hidden"></div>
+      </div>
+
+      <div class="modal-block">
+        <h4>③ 新增人员信息（报名 Excel）</h4>
+        <p id="new-enrollment-session-tip" class="inline-tip">当前未绑定培训班，请先完成第①步。</p>
+        <label>报名 Excel 文件</label>
+        <input type="file" id="new-enrollment-file" accept=".xlsx,.xls,.xlsm,.xltx,.xltm" />
+        <div class="modal-actions">
+          <button id="import-enrollment">导入人员</button>
+        </div>
+        <div id="new-enrollment-result" class="result hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="session-edit-modal" class="modal-mask">
+    <div class="modal-panel" style="width:760px;">
+      <div class="modal-header">
+        <h3>编辑历史培训班</h3>
+        <button id="close-session-edit">关闭</button>
+      </div>
+      <input type="hidden" id="session-edit-id" />
+
+      <div class="modal-block">
+        <h4>① 修改培训班信息 / 重新上传通知</h4>
+        <label>培训标题</label>
+        <input type="text" id="session-edit-title" />
+        <label>开始日期</label>
+        <input type="date" id="session-edit-start" />
+        <label>结束日期</label>
+        <input type="date" id="session-edit-end" />
+        <label>地点</label>
+        <input type="text" id="session-edit-location" />
+        <label>培训目标</label>
+        <input type="text" id="session-edit-training-goal" />
+        <label>重新上传通知文件（可选）</label>
+        <input type="file" id="session-edit-notice" />
+        <div class="modal-actions">
+          <button id="save-session-edit">保存培训班信息</button>
+        </div>
+      </div>
+
+      <div class="modal-block">
+        <h4>② 重新上传课程表（Word）</h4>
+        <label>课程表 Word 文件（.docx）</label>
+        <input type="file" id="session-edit-course-word" accept=".docx" />
+        <div class="modal-actions">
+          <button id="reimport-session-course">重新导入课程表</button>
+        </div>
+      </div>
+
+      <div class="modal-block">
+        <h4>③ 重新上传学员名单（报名 Excel）</h4>
+        <label>报名 Excel 文件</label>
+        <input type="file" id="session-edit-enrollment-file" accept=".xlsx,.xls,.xlsm,.xltx,.xltm" />
+        <div class="modal-actions">
+          <button id="reimport-session-enrollment">重新导入学员名单</button>
+        </div>
+      </div>
+
+      <div id="session-edit-result" class="result"></div>
+    </div>
+  </div>
+
+  <script src="/static/index.js"></script>
+</body>
+</html>
