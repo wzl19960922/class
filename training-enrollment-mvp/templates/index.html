@@ -61,6 +61,8 @@
 
   <section>
     <h2>今天待发送</h2>
+    <label>地图 API Key（可选，高德）</label>
+    <input type="text" id="map-api-key" placeholder="可留空；填写后可解析经纬度" />
     <button id="generate-today-tasks">生成今天任务</button>
     <button id="refresh-today-tasks">刷新任务列表</button>
     <div id="today-task-result" class="result"></div>
@@ -105,7 +107,7 @@
           </div>
         </div>
         <div class="modal-actions">
-          <button id="create-session">创建培训班</button>
+          <button id="create-session">保存并创建培训班</button>
         </div>
         <div id="new-session-result" class="result hidden"></div>
       </div>

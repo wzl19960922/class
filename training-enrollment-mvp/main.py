@@ -8,6 +8,7 @@ import zipfile
 import base64
 import logging
 import urllib.error
+import urllib.parse
 import urllib.request
 from logging.handlers import RotatingFileHandler
 from datetime import date, datetime, timedelta
@@ -446,6 +447,33 @@ def parse_notice_with_baidu_llm(notice_text: str, api_key: str) -> Dict[str, str
         message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
         result_text = message.get("content", "")
     return parse_json_from_text(result_text)
+
+
+def build_map_info(location_text: str, amap_key: str) -> Dict[str, str]:
+    location_text = (location_text or "").strip()
+    if not location_text:
+        return {"map_url": "", "geo": ""}
+
+    query = urllib.parse.urlencode({"query": location_text})
+    map_url = f"https://uri.amap.com/search?{query}"
+    if not amap_key:
+        return {"map_url": map_url, "geo": ""}
+
+    geocode_params = urllib.parse.urlencode(
+        {"address": location_text, "key": amap_key, "output": "json"}
+    )
+    geocode_url = f"https://restapi.amap.com/v3/geocode/geo?{geocode_params}"
+    try:
+        req = urllib.request.Request(geocode_url, method="GET")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        geocodes = payload.get("geocodes") or []
+        if geocodes and isinstance(geocodes[0], dict):
+            geo = geocodes[0].get("location", "")
+            return {"map_url": map_url, "geo": geo}
+    except Exception:
+        app.logger.exception("Map geocode failed for location=%s", location_text)
+    return {"map_url": map_url, "geo": ""}
 
 
 @app.route("/api/session/parse_notice", methods=["POST"])
@@ -1034,12 +1062,13 @@ def generate_today_tasks():
 @app.route("/api/tasks/today")
 def list_today_tasks():
     today = date.today().isoformat()
+    amap_key = request.args.get("map_api_key", "").strip()
     with get_connection() as conn:
         rows = conn.execute(
             """
             SELECT mt.task_id, mt.course_id, mt.task_type, mt.planned_at, mt.content,
                    mt.survey_link, mt.qr_data_uri, mt.status, mt.sent_at,
-                   c.title AS course_title, c.teacher AS course_teacher,
+                   c.title AS course_title, c.teacher AS course_teacher, c.location AS course_location,
                    (
                        SELECT COUNT(1)
                        FROM survey_response sr
@@ -1058,7 +1087,14 @@ def list_today_tasks():
             """,
             (today,),
         ).fetchall()
-    return json_response(True, [dict(row) for row in rows])
+    result = []
+    for row in rows:
+        item = dict(row)
+        map_info = build_map_info(item.get("course_location", ""), amap_key)
+        item["map_url"] = map_info["map_url"]
+        item["geo"] = map_info["geo"]
+        result.append(item)
+    return json_response(True, result)
 
 
 @app.route("/api/tasks/<int:task_id>/mark_sent", methods=["POST"])

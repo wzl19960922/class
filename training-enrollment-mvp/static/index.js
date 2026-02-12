@@ -143,7 +143,7 @@ async function createSession() {
   try {
     const data = await handleResponse(await fetch("/api/session/create", { method: "POST", body: formData }));
     currentSessionId = data.session_id;
-    showResult(newSessionResult, `<p>培训班创建成功，session_id：<strong>${currentSessionId}</strong></p>`);
+    showResult(newSessionResult, `<p>培训班保存成功，session_id：<strong>${currentSessionId}</strong></p>`);
     newCourseSessionTip.textContent = `已绑定培训班 session_id：${currentSessionId}`;
     newEnrollmentSessionTip.textContent = `已绑定培训班 session_id：${currentSessionId}`;
     await fetchHistory();
@@ -350,7 +350,9 @@ async function generateTodayTasks() {
 
 async function fetchTodayTasks() {
   try {
-    const tasks = await handleResponse(await fetch("/api/tasks/today"));
+    const mapApiKey = document.getElementById("map-api-key").value.trim();
+    const query = mapApiKey ? `?map_api_key=${encodeURIComponent(mapApiKey)}` : "";
+    const tasks = await handleResponse(await fetch(`/api/tasks/today${query}`));
     if (!tasks.length) {
       todayTaskList.innerHTML = "<p>今天暂无课后待发送任务。</p>";
       return;
@@ -372,6 +374,14 @@ async function fetchTodayTasks() {
       const qrHtml = item.qr_data_uri
         ? `<div style="margin-top:6px;"><div>二维码：</div><img src="${item.qr_data_uri}" alt="问卷二维码" width="120" /></div>`
         : '<div class="inline-tip" style="margin-top:6px;">二维码暂不可用（请检查 Pillow/qrcode 依赖或日志）。</div>';
+      const mapHtml = item.map_url
+        ? `<div style="margin-top:6px;padding:8px;border:1px solid #e7e7e7;border-radius:6px;background:#fff;">
+             <strong>培训地点</strong>
+             <div>地址：${item.course_location || ""}</div>
+             <div>坐标：${item.geo || "未解析"}</div>
+             <div><a href="${item.map_url}" target="_blank">打开地图（便于转发）</a></div>
+           </div>`
+        : "";
       const statusText = item.status === "sent" ? "已发送" : "待发送";
       const safeContent = (item.content || "").replace(/"/g, "&quot;");
       return `
@@ -381,6 +391,7 @@ async function fetchTodayTasks() {
           <div>内容：${item.content || ""}</div>
           <div>状态：${statusText}</div>
           ${surveyHtml}
+          ${mapHtml}
           ${qrHtml}
           <div>
             <button data-action="copy-task" data-task-id="${item.task_id}" data-content="${safeContent}">复制文案</button>
