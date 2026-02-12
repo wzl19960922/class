@@ -43,6 +43,12 @@ function isoToDateValue(value) {
   return (value || "").slice(0, 10);
 }
 
+function toDateTimeLocalValue(value) {
+  if (!value) return "";
+  const normalized = String(value).replace(" ", "T");
+  return normalized.slice(0, 16);
+}
+
 function resetAddTrainingModal() {
   currentSessionId = null;
   document.getElementById("new-title").value = "";
@@ -219,11 +225,32 @@ async function saveSessionEdit() {
   formData.append("training_goal", document.getElementById("session-edit-training-goal").value.trim());
   const notice = document.getElementById("session-edit-notice").files[0];
   if (notice) formData.append("notice_file", notice);
+  const courseWord = document.getElementById("session-edit-course-word").files[0];
+  const enrollmentFile = document.getElementById("session-edit-enrollment-file").files[0];
 
   try {
     await handleResponse(await fetch("/api/session/update", { method: "POST", body: formData }));
-    sessionEditResult.innerHTML = "<p>培训班信息保存成功。</p>";
+    let html = "<p>培训班信息保存成功。</p>";
+    if (courseWord) {
+      const courseForm = new FormData();
+      courseForm.append("session_id", sessionId);
+      courseForm.append("word_file", courseWord);
+      const courseData = await handleResponse(await fetch("/api/course/import", { method: "POST", body: courseForm }));
+      html += `<p>课程表已同步导入：新增 ${courseData.imported_courses} 条课程。</p>`;
+      document.getElementById("session-edit-course-word").value = "";
+    }
+    if (enrollmentFile) {
+      const enrollmentForm = new FormData();
+      enrollmentForm.append("session_id", sessionId);
+      enrollmentForm.append("excel_file", enrollmentFile);
+      const enrollmentData = await handleResponse(await fetch("/api/enrollment/import", { method: "POST", body: enrollmentForm }));
+      html += `<p>学员名单已同步导入：有效行 ${enrollmentData.valid_rows}，新增学员 ${enrollmentData.new_person_count}，新增报名 ${enrollmentData.new_enrollment_count}。</p>`;
+      document.getElementById("session-edit-enrollment-file").value = "";
+    }
+    sessionEditResult.innerHTML = html;
+    document.getElementById("session-edit-notice").value = "";
     await fetchHistory();
+    await fetchTodayTasks();
   } catch (error) {
     sessionEditResult.innerHTML = `<p class="error">保存失败：${error.message}</p>`;
   }
@@ -387,11 +414,16 @@ async function fetchTodayTasks() {
               <input type="text" id="course-title-${item.course_id}" value="${item.course_title || ""}" style="width:100%;" />
               <label>讲师</label>
               <input type="text" id="course-teacher-${item.course_id}" value="${item.course_teacher || ""}" style="width:100%;" />
+              <label>开始时间</label>
+              <input type="datetime-local" id="course-start-${item.course_id}" value="${toDateTimeLocalValue(item.start_at)}" style="width:100%;" />
+              <label>结束时间</label>
+              <input type="datetime-local" id="course-end-${item.course_id}" value="${toDateTimeLocalValue(item.end_at)}" style="width:100%;" />
               <label>地点</label>
               <input type="text" id="course-location-${item.course_id}" value="${item.course_location || ""}" style="width:100%;" />
               <div style="margin-top:8px;">
                 <button data-action="save-course" data-course-id="${item.course_id}">保存课程信息</button>
                 <button data-action="save-task-content" data-course-id="${item.course_id}">保存发送内容</button>
+                <button data-action="append-map" data-course-id="${item.course_id}">加入地图到文案</button>
                 <button data-action="copy-task" data-course-id="${item.course_id}">复制文案</button>
               </div>
             </div>
@@ -443,15 +475,13 @@ async function saveCourseInline(courseId) {
     title,
     teacher: document.getElementById(`course-teacher-${courseId}`)?.value?.trim() || "",
     location: document.getElementById(`course-location-${courseId}`)?.value?.trim() || "",
-    start_at: "",
-    end_at: "",
+    start_at: document.getElementById(`course-start-${courseId}`)?.value?.trim() || "",
+    end_at: document.getElementById(`course-end-${courseId}`)?.value?.trim() || "",
     session_id: "",
   };
 
   try {
     const old = await handleResponse(await fetch(`/api/course/${courseId}`));
-    payload.start_at = old.start_at || "";
-    payload.end_at = old.end_at || "";
     payload.session_id = old.session_id || "";
     await handleResponse(await fetch("/api/course/update", {
       method: "POST",
@@ -461,6 +491,21 @@ async function saveCourseInline(courseId) {
     await fetchTodayTasks();
   } catch (error) {
     alert(`保存课程失败：${error.message}`);
+  }
+}
+
+function appendMapToContent(courseId) {
+  const textarea = document.getElementById(`task-content-${courseId}`);
+  const location = document.getElementById(`course-location-${courseId}`)?.value?.trim() || "";
+  if (!textarea) return;
+  if (!location) {
+    alert("请先填写课程地点，再加入地图。")
+    return;
+  }
+  const mapUrl = `https://uri.amap.com/search?query=${encodeURIComponent(location)}`;
+  const toAppend = `\n培训地点：${location}\n地图导航：${mapUrl}`;
+  if (!textarea.value.includes(mapUrl)) {
+    textarea.value = `${textarea.value || ""}${toAppend}`.trim();
   }
 }
 
@@ -536,6 +581,9 @@ function bindEvents() {
     }
     if (action === "save-task-content") {
       await saveTaskContentInline(Number(button.dataset.courseId));
+    }
+    if (action === "append-map") {
+      appendMapToContent(Number(button.dataset.courseId));
     }
   });
 }

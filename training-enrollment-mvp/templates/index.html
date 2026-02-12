@@ -155,9 +155,6 @@
         <input type="text" id="session-edit-training-goal" />
         <label>重新上传通知文件（可选）</label>
         <input type="file" id="session-edit-notice" />
-        <div class="modal-actions">
-          <button id="save-session-edit">保存培训班信息</button>
-        </div>
       </div>
 
       <div class="modal-block">
@@ -171,10 +168,12 @@
 
       <div class="modal-block">
         <h4>③ 重新上传学员名单（报名 Excel）</h4>
+        <p class="inline-tip">可只改任意一项后直接保存，不需要完成全部步骤。</p>
         <label>报名 Excel 文件</label>
         <input type="file" id="session-edit-enrollment-file" accept=".xlsx,.xls,.xlsm,.xltx,.xltm" />
         <div class="modal-actions">
           <button id="reimport-session-enrollment">重新导入学员名单</button>
+          <button id="save-session-edit">保存培训班信息</button>
         </div>
       </div>
 
