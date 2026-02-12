@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Optional
 
+import pandas as pd
+
 from app.db.database import get_connection
 from app.importer.phone import PhoneNormalizationError, normalize_phone
 
@@ -38,6 +40,27 @@ def _normalize_columns(columns: Iterable[str]) -> Dict[str, str]:
         normalized = str(column).strip()
         lowered = normalized.lower()
         for key, aliases in COLUMN_ALIASES.items():
+            if normalized in aliases or lowered in aliases:
+                mapping[key] = column
+    return mapping
+
+
+def _read_value(row: pd.Series, mapping: Dict[str, str], key: str) -> Optional[str]:
+    column = mapping.get(key)
+    if column is None:
+        return None
+    value = row.get(column)
+    if pd.isna(value):
+        return None
+    return str(value).strip()
+
+
+def import_enrollments(excel_path: Path, session_id: int) -> ImportStats:
+    excel_path = Path(excel_path)
+    if not excel_path.exists():
+        raise FileNotFoundError(excel_path)
+
+    dataframes = _load_dataframes(excel_path)
             lowered_aliases = {alias.lower() for alias in aliases}
             if normalized in aliases or lowered in lowered_aliases:
                 mapping[key] = normalized
@@ -61,6 +84,15 @@ def import_enrollments(data_path: Path, session_id: int) -> ImportStats:
     imported_rows = 0
 
     with get_connection() as conn:
+        for sheet_name, dataframe in dataframes.items():
+            if dataframe.empty:
+                continue
+            dataframe = dataframe.dropna(axis=0, how="all")
+            if dataframe.empty:
+                continue
+            mapping = _normalize_columns(dataframe.columns)
+
+            for _, row in dataframe.iterrows():
         for sheet_name, rows in rows_by_sheet.items():
             if not rows:
                 continue
@@ -115,6 +147,12 @@ def import_enrollments(data_path: Path, session_id: int) -> ImportStats:
     return ImportStats(total_rows=total_rows, imported_rows=imported_rows)
 
 
+def _load_dataframes(source_path: Path) -> Dict[str, pd.DataFrame]:
+    suffix = source_path.suffix.lower()
+    if suffix == ".csv":
+        dataframe = pd.read_csv(source_path)
+        return {"csv": dataframe}
+    return pd.read_excel(source_path, sheet_name=None)
 def _load_rows(source_path: Path) -> Dict[str, list[Dict[str, object]]]:
     suffix = source_path.suffix.lower()
     if suffix == ".csv":
