@@ -501,7 +501,7 @@ def build_map_info(location_text: str, amap_key: str) -> Dict[str, str]:
     return {"map_url": map_url, "geo": ""}
 
 
-@app.route("/api/session/parse_notice", methods=["POST"])
+@app.route("/api/session/parse_notice", methods=["POST"], endpoint="api_session_parse_notice")
 def parse_notice_api():
     notice_file = request.files.get("notice_file")
     if not notice_file or not notice_file.filename:
@@ -1586,51 +1586,6 @@ def export_session_teachers_finance():
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-    body = json.dumps(
-        {
-            "model": "ernie-4.5-turbo-128k",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.01,
-            "top_p": 0.8,
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=40) as resp:
-        raw = resp.read().decode("utf-8")
-    payload = json.loads(raw)
-    if payload.get("error"):
-        message = payload["error"].get("message") or payload["error"].get("type") or "接口返回错误"
-        raise ValueError(message)
-
-    result_text = payload.get("result", "")
-    if not result_text and payload.get("choices"):
-        first_choice = payload["choices"][0] if payload["choices"] else {}
-        message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
-        result_text = message.get("content", "")
-    return parse_json_from_text(result_text)
-
-
-def build_map_info(location_text: str, amap_key: str) -> Dict[str, str]:
-    location_text = (location_text or "").strip()
-    if not location_text:
-        return {"map_url": "", "geo": ""}
-
-    query = urllib.parse.urlencode({"query": location_text})
-    map_url = f"https://uri.amap.com/search?{query}"
-    if not amap_key:
-        return {"map_url": map_url, "geo": ""}
-
-    geocode_params = urllib.parse.urlencode(
-        {"address": location_text, "key": amap_key, "output": "json"}
-    )
     geocode_url = f"https://restapi.amap.com/v3/geocode/geo?{geocode_params}"
     try:
         req = urllib.request.Request(geocode_url, method="GET")
@@ -1886,98 +1841,6 @@ def parse_date_text(date_text: str, default_year: int) -> Optional[date]:
         return date(year, month, day)
     except ValueError:
         return None
-
-
-def parse_time_range(time_text: str) -> Tuple[Optional[datetime], Optional[datetime]]:
-    text = normalize_cell_text(time_text).replace("：", ":")
-    times = re.findall(r"(\d{1,2}:\d{2})", text)
-    if len(times) >= 2:
-        return times[0], times[1]
-    if len(times) == 1:
-        return times[0], None
-    return None, None
-
-
-def combine_date_time(day: Optional[date], time_val: Optional[str]) -> Optional[str]:
-    if not day:
-        return None
-    if not time_val:
-        return datetime(day.year, day.month, day.day, 0, 0).isoformat(timespec="seconds")
-    hour, minute = [int(x) for x in time_val.split(":", 1)]
-    return datetime(day.year, day.month, day.day, hour, minute).isoformat(timespec="seconds")
-
-
-def parse_course_rows_from_word(
-    file_path: str, default_year: int, location_text: str = "", session_id: Optional[int] = None
-) -> List[Dict[str, Any]]:
-    document = Document(file_path)
-    records: List[Dict[str, Any]] = []
-
-    for table in document.tables:
-        rows = [
-            [normalize_cell_text(cell.text) for cell in row.cells]
-            for row in table.rows
-        ]
-        if len(rows) < 2:
-            continue
-
-        mapping = find_course_column_indexes(rows[0])
-        if not mapping:
-            continue
-
-        last_date_text = ""
-        last_time_text = ""
-        for row in rows[1:]:
-            course_name = row[mapping["course"]].strip() if mapping["course"] < len(row) else ""
-            if not course_name or course_name in {"报到", "返程", "下午", "上午"}:
-                continue
-
-            date_text = row[mapping["date"]].strip() if mapping.get("date") is not None and mapping["date"] < len(row) else ""
-            time_text = row[mapping["time"]].strip() if mapping.get("time") is not None and mapping["time"] < len(row) else ""
-            teacher_name = row[mapping["teacher"]].strip() if mapping.get("teacher") is not None and mapping["teacher"] < len(row) else ""
-
-            if date_text:
-                last_date_text = date_text
-            if time_text:
-                last_time_text = time_text
-
-            final_date_text = date_text or last_date_text
-            final_time_text = time_text or last_time_text
-
-            day = parse_date_text(final_date_text, default_year)
-            start_time, end_time = parse_time_range(final_time_text)
-            start_at = combine_date_time(day, start_time)
-            end_at = combine_date_time(day, end_time)
-
-            records.append(
-                {
-                    "title": course_name,
-                    "teacher": teacher_name,
-                    "start_at": start_at,
-                    "end_at": end_at,
-                    "location": location_text,
-                    "session_id": session_id,
-                }
-            )
-
-    return records
-
-
-def build_qr_data_uri(text: str) -> str:
-    if not QR_PIL_AVAILABLE:
-        raise RuntimeError("未安装 Pillow（PIL），无法生成二维码。请先安装 qrcode[pil]。")
-    image = qrcode.make(text)
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{encoded}"
-
-
-def create_today_tasks() -> Dict[str, int]:
-    today = date.today().isoformat()
-    generated = 0
-    skipped = 0
-    qr_warning_logged = False
 
 
 
