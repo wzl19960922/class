@@ -1586,6 +1586,261 @@ def export_session_teachers_finance():
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+    geocode_url = f"https://restapi.amap.com/v3/geocode/geo?{geocode_params}"
+    try:
+        req = urllib.request.Request(geocode_url, method="GET")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        geocodes = payload.get("geocodes") or []
+        if geocodes and isinstance(geocodes[0], dict):
+            geo = geocodes[0].get("location", "")
+            return {"map_url": map_url, "geo": geo}
+    except Exception:
+        app.logger.exception("Map geocode failed for location=%s", location_text)
+    return {"map_url": map_url, "geo": ""}
+
+
+@app.route("/api/session/parse_notice", methods=["POST"])
+def parse_notice_api():
+    notice_file = request.files.get("notice_file")
+    if not notice_file or not notice_file.filename:
+        return json_response(False, error="请先选择通知文件。")
+
+    suffix = Path(notice_file.filename).suffix.lower()
+    if suffix not in {".docx", ".txt"}:
+        return json_response(False, error="目前仅支持 .docx 或 .txt 通知文件解析。")
+
+    api_key = request.form.get("baidu_api_key", "").strip()
+    if not api_key:
+        return json_response(False, error="请填写百度千帆 API Key（Bearer）。")
+
+    _, file_path = save_upload(notice_file)
+    try:
+        notice_text = extract_notice_text(file_path)
+        if not notice_text.strip():
+            return json_response(False, error="通知文件未读取到有效文本，请检查文档内容。")
+        parsed = parse_notice_with_baidu_llm(notice_text, api_key)
+        return json_response(True, parsed)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        app.logger.exception("Baidu parse HTTP error: %s", detail)
+        return json_response(False, error=f"百度云接口调用失败：{detail[:300] or exc.reason}")
+    except ValueError as exc:
+        message = str(exc)
+        if "Access token invalid" in message or "Invalid authentication" in message:
+            return json_response(False, error="API Key 无效或已过期，请在百度千帆控制台重新获取后再试。")
+        return json_response(False, error=f"解析失败：{message}")
+    except Exception as exc:
+        app.logger.exception("Parse notice failed")
+        return json_response(False, error=f"解析失败：{exc}")
+
+
+def import_excel(file_path: str, source_file: str, session_id: int) -> Dict[str, Any]:
+    sheets = pd.read_excel(file_path, sheet_name=None, dtype=str, engine="openpyxl")
+    sheet_count = len(sheets)
+    valid_rows = 0
+    new_person_count = 0
+    new_enrollment_count = 0
+    exceptions: List[Dict[str, Any]] = []
+
+    with get_connection() as conn:
+        try:
+            for sheet_name, df in sheets.items():
+                if df is None or df.empty:
+                    continue
+                df = df.fillna("")
+                columns = list(df.columns)
+                phone_col = guess_column(
+                    columns, ["手机", "手机号", "电话", "mobile", "phone"]
+                )
+                if not phone_col:
+                    exceptions.append(
+                        {
+                            "sheet": sheet_name,
+                            "row": None,
+                            "reason": "未找到手机号列",
+                        }
+                    )
+                    continue
+
+                name_col = guess_column(columns, ["姓名", "name"])
+                org_col = guess_column(columns, ["单位", "机构", "company", "org"])
+                region_col = guess_column(columns, ["地区", "区域", "省", "市", "region"])
+                title_col = guess_column(columns, ["职务", "岗位", "title"])
+                remote_id_col = guess_column(columns, ["工号", "编号", "学号", "id"])
+                room_col = guess_column(columns, ["住宿", "房间", "room"])
+
+                column_index = {col: idx for idx, col in enumerate(columns)}
+                for row_index, row in enumerate(
+                    df.itertuples(index=False, name=None), start=2
+                ):
+                    values = list(row)
+                    if not row_has_data(values):
+                        continue
+                    phone_raw = row[column_index[phone_col]]
+                    phone_norm = normalize_phone(phone_raw)
+                    if not phone_norm:
+                        exceptions.append(
+                            {
+                                "sheet": sheet_name,
+                                "row": row_index,
+                                "reason": "手机号空或非法",
+                            }
+                        )
+                        continue
+
+                    name = row[column_index[name_col]] if name_col else ""
+                    org_text = row[column_index[org_col]] if org_col else ""
+                    region_text = row[column_index[region_col]] if region_col else ""
+                    title_text = row[column_index[title_col]] if title_col else ""
+                    remote_id_snapshot = (
+                        row[column_index[remote_id_col]] if remote_id_col else ""
+                    )
+                    room_preference = row[column_index[room_col]] if room_col else ""
+
+                    cursor = conn.execute(
+                        "SELECT person_id FROM person WHERE phone_norm = ?",
+                        (phone_norm,),
+                    )
+                    person_row = cursor.fetchone()
+                    if person_row:
+                        person_id = person_row["person_id"]
+                        conn.execute(
+                            """
+                            UPDATE person
+                            SET name_latest = ?, org_text_latest = ?
+                            WHERE person_id = ?
+                            """,
+                            (name or None, org_text or None, person_id),
+                        )
+                    else:
+                        cursor = conn.execute(
+                            """
+                            INSERT INTO person (phone_norm, name_latest, org_text_latest)
+                            VALUES (?, ?, ?)
+                            """,
+                            (phone_norm, name or None, org_text or None),
+                        )
+                        person_id = cursor.lastrowid
+                        new_person_count += 1
+
+                    conn.execute(
+                        """
+                        INSERT INTO enrollment (
+                            session_id,
+                            person_id,
+                            enrolled_at,
+                            name_snapshot,
+                            org_text,
+                            region_text,
+                            title_text,
+                            remote_id_snapshot,
+                            room_preference,
+                            source_file,
+                            source_sheet
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            session_id,
+                            person_id,
+                            datetime.now().isoformat(timespec="seconds"),
+                            name or None,
+                            org_text or None,
+                            region_text or None,
+                            title_text or None,
+                            remote_id_snapshot or None,
+                            room_preference or None,
+                            source_file,
+                            sheet_name,
+                        ),
+                    )
+                    new_enrollment_count += 1
+                    valid_rows += 1
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return {
+        "sheet_count": sheet_count,
+        "valid_rows": valid_rows,
+        "new_person_count": new_person_count,
+        "new_enrollment_count": new_enrollment_count,
+        "exceptions": exceptions,
+    }
+
+
+@app.route("/api/enrollment/import", methods=["POST"])
+def import_enrollment():
+    excel_file = request.files.get("excel_file")
+    if not excel_file or not excel_file.filename:
+        return json_response(False, error="请上传报名 Excel 文件。")
+    if not is_excel_filename(excel_file.filename):
+        return json_response(
+            False,
+            error="仅支持 Excel 文件（.xlsx/.xls/.xlsm/.xltx/.xltm），请重新上传。",
+        )
+
+    session_id_value = request.form.get("session_id")
+    session_id = resolve_session_id(session_id_value)
+    if not session_id:
+        return json_response(False, error="未找到可用的期次，请先创建期次。")
+
+    cursor = get_connection().execute(
+        "SELECT session_id FROM training_session WHERE session_id = ?", (session_id,)
+    )
+    if not cursor.fetchone():
+        return json_response(False, error="期次不存在，请重新创建。")
+
+    source_file, file_path = save_upload(excel_file)
+    try:
+        receipt = import_excel(file_path, source_file, session_id)
+    except Exception as exc:
+        return json_response(False, error=f"导入失败: {exc}")
+
+    return json_response(True, receipt)
+
+
+
+
+def normalize_cell_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def find_course_column_indexes(headers: List[str]) -> Optional[Dict[str, int]]:
+    mapping: Dict[str, int] = {}
+    for idx, header in enumerate(headers):
+        h = normalize_cell_text(header)
+        if any(key in h for key in ["日期", "日 期"]):
+            mapping["date"] = idx
+        elif any(key in h for key in ["时间", "时 间"]):
+            mapping["time"] = idx
+        elif any(key in h for key in ["内容", "课程", "课程名称"]):
+            mapping["course"] = idx
+        elif any(key in h for key in ["授课教师", "教师", "老师"]):
+            mapping["teacher"] = idx
+
+    if "course" not in mapping:
+        return None
+    return mapping
+
+
+def parse_date_text(date_text: str, default_year: int) -> Optional[date]:
+    text = normalize_cell_text(date_text)
+    if not text:
+        return None
+    nums = re.findall(r"\d+", text)
+    if len(nums) >= 3:
+        year, month, day = int(nums[0]), int(nums[1]), int(nums[2])
+    elif len(nums) >= 2:
+        year, month, day = default_year, int(nums[0]), int(nums[1])
+    else:
+        return None
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
 
 
 
