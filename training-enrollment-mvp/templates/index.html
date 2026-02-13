@@ -37,6 +37,7 @@
       border-radius: 14px;
     }
     .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    .secondary-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; align-items: start; }
     .result {
       margin-top: 10px;
       background: var(--success-bg);
@@ -117,7 +118,7 @@
     th, td { border-bottom: 1px solid #e6edf7; padding: 8px 6px; text-align: left; }
     th { background: #f5f9ff; }
     @media (max-width: 960px) {
-      .main-grid, .task-row { grid-template-columns: 1fr; }
+      .main-grid, .secondary-grid, .task-row { grid-template-columns: 1fr; }
       .app-shell { padding: 0 10px; }
       h1 { font-size: 24px; }
     }
@@ -150,15 +151,31 @@
     </section>
   </div>
 
-  <section>
-    <h2>近期课程待发送（最近3个）</h2>
-    <label>地图 API Key（可选，高德）</label>
-    <input type="text" id="map-api-key" placeholder="可留空；填写后可解析经纬度" />
-    <button id="generate-today-tasks">生成今天任务</button>
-    <button id="refresh-today-tasks">刷新任务列表</button>
-    <div id="today-task-result" class="result"></div>
-    <div id="today-task-list" class="task-box"></div>
-  </section>
+  <div class="secondary-grid">
+    <section>
+      <h2>近期课程待发送（最近3个）</h2>
+      <label>地图 API Key（可选，高德）</label>
+      <input type="text" id="map-api-key" placeholder="可留空；填写后可解析经纬度" />
+      <button id="generate-today-tasks">生成今天任务</button>
+      <button id="refresh-today-tasks">刷新任务列表</button>
+      <div id="today-task-result" class="result"></div>
+      <div id="today-task-list" class="task-box"></div>
+    </section>
+
+    <section>
+      <h2>财务大模块</h2>
+      <div class="inline-tip">可反复上传 CSV 更新记录，支持按姓名/手机号/单位/开户行等搜索。</div>
+      <label>上传财务 CSV</label>
+      <input type="file" id="finance-csv-file" accept=".csv" />
+      <button id="finance-import">上传并更新</button>
+      <div id="finance-import-result" class="result hidden"></div>
+
+      <label>搜索</label>
+      <input type="text" id="finance-search" placeholder="输入姓名/手机/单位/开户行/编号" />
+      <button id="finance-search-btn">搜索</button>
+      <div id="finance-list" class="task-box"></div>
+    </section>
+  </div>
 
   <section>
     <h2>运行日志（错误排查）</h2>

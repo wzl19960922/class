@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import csv
 import os
 import re
 import sqlite3
@@ -164,6 +165,30 @@ def initialize_database() -> None:
                 recommend_score INTEGER,
                 submitted_at TEXT,
                 FOREIGN KEY(course_id) REFERENCES course(course_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_record (
+                record_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_no TEXT UNIQUE,
+                start_time TEXT,
+                end_time TEXT,
+                duration_text TEXT,
+                name TEXT,
+                phone TEXT,
+                id_card TEXT,
+                org_name TEXT,
+                job_title TEXT,
+                bank_card TEXT,
+                bank_name TEXT,
+                city_name TEXT,
+                user_type TEXT,
+                nickname TEXT,
+                source_file TEXT,
+                updated_at TEXT,
+                raw_json TEXT
             )
             """
         )
@@ -1283,6 +1308,168 @@ def fetch_yearly_stats(year: str) -> Dict[str, Any]:
         "repeat_people": repeat_people,
         "top5": top5,
     }
+
+
+def normalize_header_name(text: str) -> str:
+    text = (text or "").strip().replace("\ufeff", "")
+    text = re.sub(r"^[0-9]+[\.、]", "", text)
+    text = text.replace("（", "(").replace("）", ")")
+    text = re.sub(r"\s+", "", text)
+    return text.lower()
+
+
+def choose_field(row: Dict[str, str], headers: Dict[str, str], aliases: List[str]) -> str:
+    for alias in aliases:
+        key = normalize_header_name(alias)
+        if key in headers:
+            return (row.get(headers[key], "") or "").strip()
+    return ""
+
+
+@app.route("/api/finance/import", methods=["POST"])
+def import_finance_csv():
+    csv_file = request.files.get("csv_file")
+    if not csv_file or not csv_file.filename:
+        return json_response(False, error="请上传财务 CSV 文件。")
+    if not csv_file.filename.lower().endswith(".csv"):
+        return json_response(False, error="仅支持 CSV 文件。")
+
+    saved_name, file_path = save_upload(csv_file)
+    imported = 0
+    updated = 0
+    skipped = 0
+
+    try:
+        with open(file_path, "r", encoding="utf-8-sig", errors="ignore", newline="") as handle:
+            sample = handle.read(4096)
+            handle.seek(0)
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
+            except Exception:
+                dialect = csv.excel_tab
+            reader = csv.DictReader(handle, dialect=dialect)
+            if not reader.fieldnames:
+                return json_response(False, error="CSV 表头为空，无法导入。")
+
+            headers = {normalize_header_name(name): name for name in reader.fieldnames}
+            now = datetime.now().isoformat(timespec="seconds")
+            with get_connection() as conn:
+                for row in reader:
+                    if not row:
+                        continue
+                    record_no = choose_field(row, headers, ["编号", "id", "序号"])
+                    if not record_no:
+                        skipped += 1
+                        continue
+
+                    payload = {
+                        "record_no": record_no,
+                        "start_time": choose_field(row, headers, ["开始答题时间", "开始时间"]),
+                        "end_time": choose_field(row, headers, ["结束答题时间", "结束时间"]),
+                        "duration_text": choose_field(row, headers, ["答题时长", "时长"]),
+                        "name": choose_field(row, headers, ["姓名", "1.姓名"]),
+                        "phone": choose_field(row, headers, ["手机", "手机号", "2.手机"]),
+                        "id_card": choose_field(row, headers, ["身份证号", "3.身份证号"]),
+                        "org_name": choose_field(row, headers, ["工作单位", "4.工作单位"]),
+                        "job_title": choose_field(row, headers, ["职务/职称", "5.职务/职称", "职务"]),
+                        "bank_card": choose_field(row, headers, ["银行卡号", "7.银行卡号"]),
+                        "bank_name": choose_field(row, headers, ["开户行", "8.开户行"]),
+                        "city_name": choose_field(row, headers, ["地理位置市", "城市"]),
+                        "user_type": choose_field(row, headers, ["用户类型"]),
+                        "nickname": choose_field(row, headers, ["昵称"]),
+                        "source_file": saved_name,
+                        "updated_at": now,
+                        "raw_json": json.dumps(row, ensure_ascii=False),
+                    }
+
+                    exists = conn.execute(
+                        "SELECT record_id FROM finance_record WHERE record_no = ?",
+                        (record_no,),
+                    ).fetchone()
+                    if exists:
+                        conn.execute(
+                            """
+                            UPDATE finance_record
+                            SET start_time = ?, end_time = ?, duration_text = ?, name = ?, phone = ?,
+                                id_card = ?, org_name = ?, job_title = ?, bank_card = ?, bank_name = ?,
+                                city_name = ?, user_type = ?, nickname = ?, source_file = ?, updated_at = ?, raw_json = ?
+                            WHERE record_no = ?
+                            """,
+                            (
+                                payload["start_time"], payload["end_time"], payload["duration_text"], payload["name"], payload["phone"],
+                                payload["id_card"], payload["org_name"], payload["job_title"], payload["bank_card"], payload["bank_name"],
+                                payload["city_name"], payload["user_type"], payload["nickname"], payload["source_file"], payload["updated_at"], payload["raw_json"],
+                                record_no,
+                            ),
+                        )
+                        updated += 1
+                    else:
+                        conn.execute(
+                            """
+                            INSERT INTO finance_record (
+                                record_no, start_time, end_time, duration_text, name, phone, id_card,
+                                org_name, job_title, bank_card, bank_name, city_name, user_type,
+                                nickname, source_file, updated_at, raw_json
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                payload["record_no"], payload["start_time"], payload["end_time"], payload["duration_text"], payload["name"], payload["phone"], payload["id_card"],
+                                payload["org_name"], payload["job_title"], payload["bank_card"], payload["bank_name"], payload["city_name"], payload["user_type"],
+                                payload["nickname"], payload["source_file"], payload["updated_at"], payload["raw_json"],
+                            ),
+                        )
+                        imported += 1
+                conn.commit()
+    except Exception as exc:
+        app.logger.exception("Finance CSV import failed")
+        return json_response(False, error=f"导入失败：{exc}")
+
+    return json_response(True, {
+        "imported": imported,
+        "updated": updated,
+        "skipped": skipped,
+        "source_file": saved_name,
+    })
+
+
+@app.route("/api/finance/list")
+def finance_list():
+    keyword = request.args.get("q", "").strip()
+    page = max(1, int(request.args.get("page", "1")))
+    page_size = min(100, max(10, int(request.args.get("page_size", "20"))))
+    offset = (page - 1) * page_size
+
+    where_sql = ""
+    params: List[Any] = []
+    if keyword:
+        where_sql = "WHERE record_no LIKE ? OR name LIKE ? OR phone LIKE ? OR org_name LIKE ? OR bank_name LIKE ?"
+        like_kw = f"%{keyword}%"
+        params.extend([like_kw, like_kw, like_kw, like_kw, like_kw])
+
+    with get_connection() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(1) AS c FROM finance_record {where_sql}",
+            tuple(params),
+        ).fetchone()["c"]
+        rows = conn.execute(
+            f"""
+            SELECT record_id, record_no, start_time, end_time, duration_text, name, phone,
+                   id_card, org_name, job_title, bank_card, bank_name, city_name,
+                   user_type, nickname, source_file, updated_at
+            FROM finance_record
+            {where_sql}
+            ORDER BY COALESCE(start_time, updated_at) DESC, record_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params + [page_size, offset]),
+        ).fetchall()
+
+    return json_response(True, {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "rows": [dict(row) for row in rows],
+    })
 
 
 

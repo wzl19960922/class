@@ -4,6 +4,8 @@ const todayTaskResult = document.getElementById("today-task-result");
 const todayTaskList = document.getElementById("today-task-list");
 const logPath = document.getElementById("log-path");
 const logContent = document.getElementById("log-content");
+const financeImportResult = document.getElementById("finance-import-result");
+const financeList = document.getElementById("finance-list");
 
 const addTrainingModal = document.getElementById("add-training-modal");
 const newSessionResult = document.getElementById("new-session-result");
@@ -446,6 +448,49 @@ async function fetchLogs() {
   }
 }
 
+async function importFinanceCsv() {
+  const file = document.getElementById("finance-csv-file").files[0];
+  if (!file) {
+    showResult(financeImportResult, "请先选择 CSV 文件。", true);
+    return;
+  }
+  const formData = new FormData();
+  formData.append("csv_file", file);
+  try {
+    const data = await handleResponse(await fetch("/api/finance/import", { method: "POST", body: formData }));
+    showResult(financeImportResult, `导入成功：新增 ${data.imported} 条，更新 ${data.updated} 条，跳过 ${data.skipped} 条。`);
+    await fetchFinanceList();
+  } catch (error) {
+    showResult(financeImportResult, `导入失败：${error.message}`, true);
+  }
+}
+
+async function fetchFinanceList() {
+  const keyword = document.getElementById("finance-search").value.trim();
+  const query = keyword ? `?q=${encodeURIComponent(keyword)}` : "";
+  try {
+    const data = await handleResponse(await fetch(`/api/finance/list${query}`));
+    const rows = data.rows || [];
+    if (!rows.length) {
+      financeList.innerHTML = "<p>暂无财务记录。</p>";
+      return;
+    }
+    financeList.innerHTML = rows.map((row) => `
+      <div class="task-item">
+        <div><strong>#${row.record_no || ""} ${row.name || ""}</strong></div>
+        <div>手机：${row.phone || ""}</div>
+        <div>单位：${row.org_name || ""}</div>
+        <div>职务：${row.job_title || ""}</div>
+        <div>开户行：${row.bank_name || ""}</div>
+        <div>银行卡：${row.bank_card || ""}</div>
+        <div>答题时间：${row.start_time || ""} ~ ${row.end_time || ""}</div>
+      </div>
+    `).join("");
+  } catch (error) {
+    financeList.innerHTML = `<p class="error">加载财务记录失败：${error.message}</p>`;
+  }
+}
+
 async function markTaskSent(taskId) {
   try {
     await handleResponse(await fetch(`/api/tasks/${taskId}/mark_sent`, { method: "POST" }));
@@ -553,6 +598,8 @@ function bindEvents() {
   document.getElementById("generate-today-tasks").addEventListener("click", generateTodayTasks);
   document.getElementById("refresh-today-tasks").addEventListener("click", fetchTodayTasks);
   document.getElementById("refresh-logs").addEventListener("click", fetchLogs);
+  document.getElementById("finance-import").addEventListener("click", importFinanceCsv);
+  document.getElementById("finance-search-btn").addEventListener("click", fetchFinanceList);
 
   historyList.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action='edit-session']");
@@ -595,6 +642,7 @@ function init() {
   fetchStats();
   fetchHistory();
   fetchTodayTasks();
+  fetchFinanceList();
   fetchLogs();
 }
 
