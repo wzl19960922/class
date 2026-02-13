@@ -27,6 +27,30 @@ python env_check.py
 python main.py
 ```
 
+## 常见启动报错排查
+
+### 1) `View function mapping is overwriting an existing endpoint function: index`
+### 2) `View function mapping is overwriting an existing endpoint function: import_course_word`
+
+这两个报错通常表示：你本地 `main.py` 不是最新版本（常见于冲突后重复粘贴、旧文件未覆盖）。
+
+建议按下面顺序处理（Windows PowerShell）：
+
+```powershell
+cd D:\survey\class\training-enrollment-mvp
+git status
+git fetch --all
+git reset --hard origin/<你的分支名>
+python -m py_compile main.py
+```
+
+如果你不方便 `reset --hard`，至少先对比以下关键行是否存在：
+
+- `@app.route("/", endpoint="home_page")`
+- `@app.route("/api/course/import", methods=["POST"], endpoint="api_course_import")`
+
+若不存在，说明仍是旧版本文件，请先同步代码再运行。
+
 ## 主要文件
 
 - `env_check.py`：环境自检脚本
