@@ -1586,6 +1586,76 @@ def export_session_teachers_finance():
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+    if not cursor.fetchone():
+        return json_response(False, error="期次不存在，请重新创建。")
+
+    source_file, file_path = save_upload(excel_file)
+    try:
+        receipt = import_excel(file_path, source_file, session_id)
+    except Exception as exc:
+        return json_response(False, error=f"导入失败: {exc}")
+
+    return json_response(True, receipt)
+
+
+
+
+def normalize_cell_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def find_course_column_indexes(headers: List[str]) -> Optional[Dict[str, int]]:
+    mapping: Dict[str, int] = {}
+    for idx, header in enumerate(headers):
+        h = normalize_cell_text(header)
+        if any(key in h for key in ["日期", "日 期"]):
+            mapping["date"] = idx
+        elif any(key in h for key in ["时间", "时 间"]):
+            mapping["time"] = idx
+        elif any(key in h for key in ["内容", "课程", "课程名称"]):
+            mapping["course"] = idx
+        elif any(key in h for key in ["授课教师", "教师", "老师"]):
+            mapping["teacher"] = idx
+
+    if "course" not in mapping:
+        return None
+    return mapping
+
+
+def parse_date_text(date_text: str, default_year: int) -> Optional[date]:
+    text = normalize_cell_text(date_text)
+    if not text:
+        return None
+    nums = re.findall(r"\d+", text)
+    if len(nums) >= 3:
+        year, month, day = int(nums[0]), int(nums[1]), int(nums[2])
+    elif len(nums) >= 2:
+        year, month, day = default_year, int(nums[0]), int(nums[1])
+    else:
+        return None
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def parse_time_range(time_text: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+    text = normalize_cell_text(time_text).replace("：", ":")
+    times = re.findall(r"(\d{1,2}:\d{2})", text)
+    if len(times) >= 2:
+        return times[0], times[1]
+    if len(times) == 1:
+        return times[0], None
+    return None, None
+
+
+def combine_date_time(day: Optional[date], time_val: Optional[str]) -> Optional[str]:
+    if not day:
+        return None
+    if not time_val:
+        return datetime(day.year, day.month, day.day, 0, 0).isoformat(timespec="seconds")
+    hour, minute = [int(x) for x in time_val.split(":", 1)]
+    return datetime(day.year, day.month, day.day, hour, minute).isoformat(timespec="seconds")
 
 
 
