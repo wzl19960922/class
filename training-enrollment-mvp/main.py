@@ -1472,6 +1472,846 @@ def finance_list():
     })
 
 
+def split_teacher_names(text: str) -> List[str]:
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    parts = re.split(r"[、,/，;；\s]+", raw)
+    return [p.strip() for p in parts if p.strip()]
+
+
+@app.route("/api/finance/export/session_teachers")
+def export_session_teachers_finance():
+    session_id_text = request.args.get("session_id", "").strip()
+    if not session_id_text.isdigit():
+        return json_response(False, error="请提供合法 session_id。")
+    session_id = int(session_id_text)
+
+    with get_connection() as conn:
+        session_row = conn.execute(
+            """
+            SELECT session_id, title, start_date, end_date, location_text
+            FROM training_session
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        if not session_row:
+            return json_response(False, error="培训班不存在。")
+
+        course_rows = conn.execute(
+            """
+            SELECT course_id, title, teacher, start_at, end_at, location
+            FROM course
+            WHERE session_id = ?
+            ORDER BY COALESCE(start_at, end_at, created_at), course_id
+            """,
+            (session_id,),
+        ).fetchall()
+
+        teacher_map: Dict[str, Dict[str, Any]] = {}
+        for course in course_rows:
+            names = split_teacher_names(course["teacher"] or "")
+            if not names:
+                continue
+            for teacher_name in names:
+                if teacher_name not in teacher_map:
+                    teacher_map[teacher_name] = {
+                        "teacher_name": teacher_name,
+                        "course_titles": set(),
+                        "first_start_at": course["start_at"] or "",
+                        "last_end_at": course["end_at"] or "",
+                        "course_location": course["location"] or "",
+                    }
+                teacher_map[teacher_name]["course_titles"].add(course["title"] or "")
+                if course["start_at"] and (
+                    not teacher_map[teacher_name]["first_start_at"]
+                    or course["start_at"] < teacher_map[teacher_name]["first_start_at"]
+                ):
+                    teacher_map[teacher_name]["first_start_at"] = course["start_at"]
+                if course["end_at"] and (
+                    not teacher_map[teacher_name]["last_end_at"]
+                    or course["end_at"] > teacher_map[teacher_name]["last_end_at"]
+                ):
+                    teacher_map[teacher_name]["last_end_at"] = course["end_at"]
+
+        export_rows: List[Dict[str, Any]] = []
+        for teacher_name, info in teacher_map.items():
+            finance = conn.execute(
+                """
+                SELECT name, phone, id_card, org_name, job_title, bank_card, bank_name, city_name, user_type, nickname, updated_at
+                FROM finance_record
+                WHERE name = ?
+                ORDER BY COALESCE(start_time, updated_at) DESC, record_id DESC
+                LIMIT 1
+                """,
+                (teacher_name,),
+            ).fetchone()
+            export_rows.append(
+                {
+                    "培训班ID": session_row["session_id"],
+                    "培训班名称": session_row["title"] or "",
+                    "培训时间": f"{session_row['start_date'] or ''}~{session_row['end_date'] or ''}",
+                    "培训地点": session_row["location_text"] or "",
+                    "授课老师": teacher_name,
+                    "课程名称": "；".join(sorted(info["course_titles"])),
+                    "课程开始": info["first_start_at"],
+                    "课程结束": info["last_end_at"],
+                    "课程地点": info["course_location"],
+                    "手机": finance["phone"] if finance else "",
+                    "身份证号": finance["id_card"] if finance else "",
+                    "工作单位": finance["org_name"] if finance else "",
+                    "职务/职称": finance["job_title"] if finance else "",
+                    "银行卡号": finance["bank_card"] if finance else "",
+                    "开户行": finance["bank_name"] if finance else "",
+                    "城市": finance["city_name"] if finance else "",
+                    "用户类型": finance["user_type"] if finance else "",
+                    "昵称": finance["nickname"] if finance else "",
+                    "财务信息更新时间": finance["updated_at"] if finance else "",
+                }
+            )
+
+    if not export_rows:
+        return json_response(False, error="该培训班课程表中未找到授课老师信息，无法导出。")
+
+    df = pd.DataFrame(export_rows)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="老师财务信息")
+    output.seek(0)
+    filename = f"session_{session_id}_teachers_finance.xlsx"
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    app.logger.setLevel(logging.INFO)
+    app.logger.handlers.clear()
+    app.logger.addHandler(handler)
+    app.logger.addHandler(logging.StreamHandler())
+
+
+ALLOWED_EXCEL_EXTENSIONS = {".xlsx", ".xlsm", ".xltx", ".xltm", ".xls"}
+ALLOWED_WORD_EXTENSIONS = {".docx"}
+
+
+def is_excel_filename(filename: str) -> bool:
+    return Path(filename).suffix.lower() in ALLOWED_EXCEL_EXTENSIONS
+
+
+def is_word_filename(filename: str) -> bool:
+    return Path(filename).suffix.lower() in ALLOWED_WORD_EXTENSIONS
+
+
+def get_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def initialize_database() -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS person (
+                person_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone_norm TEXT UNIQUE NOT NULL,
+                name_latest TEXT,
+                org_text_latest TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS training_session (
+                session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                location_text TEXT,
+                training_goal TEXT,
+                notice_filename TEXT,
+                notice_sha256 TEXT,
+                created_at TEXT
+            )
+            """
+        )
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(training_session)").fetchall()
+        }
+        if "training_goal" not in columns:
+            conn.execute("ALTER TABLE training_session ADD COLUMN training_goal TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS enrollment (
+                enrollment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                person_id INTEGER NOT NULL,
+                enrolled_at TEXT,
+                name_snapshot TEXT,
+                org_text TEXT,
+                region_text TEXT,
+                title_text TEXT,
+                remote_id_snapshot TEXT,
+                room_preference TEXT,
+                source_file TEXT,
+                source_sheet TEXT,
+                FOREIGN KEY(session_id) REFERENCES training_session(session_id),
+                FOREIGN KEY(person_id) REFERENCES person(person_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS course (
+                course_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                teacher TEXT,
+                start_at TEXT,
+                end_at TEXT,
+                location TEXT,
+                session_id INTEGER,
+                source_file TEXT,
+                created_at TEXT,
+                FOREIGN KEY(session_id) REFERENCES training_session(session_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS message_task (
+                task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                course_id INTEGER NOT NULL,
+                task_type TEXT NOT NULL,
+                planned_at TEXT NOT NULL,
+                content TEXT,
+                survey_link TEXT,
+                qr_data_uri TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                sent_at TEXT,
+                created_at TEXT,
+                UNIQUE(course_id, task_type, planned_at),
+                FOREIGN KEY(course_id) REFERENCES course(course_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS survey_response (
+                response_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                course_id INTEGER NOT NULL,
+                satisfaction_score INTEGER,
+                gain_text TEXT,
+                suggestion_text TEXT,
+                recommend_score INTEGER,
+                submitted_at TEXT,
+                FOREIGN KEY(course_id) REFERENCES course(course_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_record (
+                record_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_no TEXT UNIQUE,
+                start_time TEXT,
+                end_time TEXT,
+                duration_text TEXT,
+                name TEXT,
+                phone TEXT,
+                id_card TEXT,
+                org_name TEXT,
+                job_title TEXT,
+                bank_card TEXT,
+                bank_name TEXT,
+                city_name TEXT,
+                user_type TEXT,
+                nickname TEXT,
+                source_file TEXT,
+                updated_at TEXT,
+                raw_json TEXT
+            )
+            """
+        )
+
+
+def normalize_phone(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace(" ", "").replace("-", "")
+    if text.startswith("+86"):
+        text = text[3:]
+    if text.startswith("86"):
+        text = text[2:]
+    digits = re.sub(r"\D", "", text)
+    if len(digits) >= 11:
+        digits = digits[-11:]
+    if re.fullmatch(r"1\d{10}", digits):
+        return digits
+    return None
+
+
+def guess_column(columns: List[str], keywords: List[str]) -> Optional[str]:
+    normalized = {col: re.sub(r"\s+", "", col).lower() for col in columns}
+    for col, col_norm in normalized.items():
+        for keyword in keywords:
+            if keyword in col_norm:
+                return col
+    return None
+
+
+def row_has_data(values: List[Any]) -> bool:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, float) and pd.isna(value):
+            continue
+        if str(value).strip() != "":
+            return True
+    return False
+
+
+def save_upload(file_storage) -> Tuple[str, str]:
+    UPLOAD_DIR.mkdir(exist_ok=True)
+    filename = file_storage.filename or "upload"
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", filename)
+    saved_name = f"{timestamp}_{safe_name}"
+    file_path = UPLOAD_DIR / saved_name
+    file_storage.save(file_path)
+    return saved_name, str(file_path)
+
+
+def compute_sha256(file_path: str) -> str:
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(8192), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+def json_response(ok: bool, data: Any = None, error: Optional[str] = None):
+    return jsonify({"ok": ok, "data": data, "error": error})
+
+
+@app.errorhandler(Exception)
+def handle_exception(exc: Exception):
+    app.logger.exception("Unhandled exception on %s %s", request.method, request.path)
+    if request.path.startswith("/api/"):
+        return json_response(False, error=f"服务异常: {exc}"), 500
+    raise exc
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/add")
+def add_page():
+    return render_template("add.html")
+
+
+@app.route("/api/session/create", methods=["POST"])
+def create_session():
+    title = request.form.get("title", "").strip()
+    start_date = request.form.get("start_date", "").strip()
+    end_date = request.form.get("end_date", "").strip()
+    location_text = request.form.get("location_text", "").strip()
+    training_goal = request.form.get("training_goal", "").strip()
+
+    notice_file = request.files.get("notice_file")
+    notice_filename = None
+    notice_sha256 = None
+    if notice_file and notice_file.filename:
+        notice_filename, file_path = save_upload(notice_file)
+        notice_sha256 = compute_sha256(file_path)
+
+    created_at = datetime.now().isoformat(timespec="seconds")
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO training_session
+            (title, start_date, end_date, location_text, training_goal, notice_filename, notice_sha256, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                title,
+                start_date,
+                end_date,
+                location_text,
+                training_goal,
+                notice_filename,
+                notice_sha256,
+                created_at,
+            ),
+        )
+        session_id = cursor.lastrowid
+
+    global LATEST_SESSION_ID
+    LATEST_SESSION_ID = session_id
+    return json_response(True, {"session_id": session_id})
+
+
+@app.route("/api/session/<int:session_id>")
+def get_session(session_id: int):
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT session_id, title, start_date, end_date, location_text,
+                   training_goal, notice_filename, notice_sha256, created_at
+            FROM training_session
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+    if not row:
+        return json_response(False, error="期次不存在。")
+    return json_response(True, dict(row))
+
+
+@app.route("/api/session/update", methods=["POST"])
+def update_session():
+    session_id_text = request.form.get("session_id", "").strip()
+    if not session_id_text.isdigit():
+        return json_response(False, error="session_id 非法。")
+
+    session_id = int(session_id_text)
+    title = request.form.get("title", "").strip()
+    start_date = request.form.get("start_date", "").strip()
+    end_date = request.form.get("end_date", "").strip()
+    location_text = request.form.get("location_text", "").strip()
+    training_goal = request.form.get("training_goal", "").strip()
+
+    with get_connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT notice_filename, notice_sha256
+            FROM training_session
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        if not existing:
+            return json_response(False, error="期次不存在。")
+
+        notice_filename = existing["notice_filename"]
+        notice_sha256 = existing["notice_sha256"]
+        notice_file = request.files.get("notice_file")
+        if notice_file and notice_file.filename:
+            notice_filename, file_path = save_upload(notice_file)
+            notice_sha256 = compute_sha256(file_path)
+
+        conn.execute(
+            """
+            UPDATE training_session
+            SET title = ?, start_date = ?, end_date = ?, location_text = ?, training_goal = ?,
+                notice_filename = ?, notice_sha256 = ?
+            WHERE session_id = ?
+            """,
+            (
+                title,
+                start_date,
+                end_date,
+                location_text,
+                training_goal,
+                notice_filename,
+                notice_sha256,
+                session_id,
+            ),
+        )
+
+    global LATEST_SESSION_ID
+    LATEST_SESSION_ID = session_id
+    return json_response(True, {"session_id": session_id})
+
+
+def resolve_session_id(session_id_value: Optional[str]) -> Optional[int]:
+    if session_id_value:
+        try:
+            return int(session_id_value)
+        except ValueError:
+            return None
+    return LATEST_SESSION_ID
+
+
+def extract_notice_text(file_path: str) -> str:
+    suffix = Path(file_path).suffix.lower()
+    if suffix == ".docx":
+        doc = Document(file_path)
+        lines: List[str] = []
+        for p in doc.paragraphs:
+            text = (p.text or "").strip()
+            if text:
+                lines.append(text)
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = " | ".join((cell.text or "").strip() for cell in row.cells if (cell.text or "").strip())
+                if row_text:
+                    lines.append(row_text)
+        return "\n".join(lines)
+
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
+        return handle.read()
+
+
+def parse_json_from_text(text: str) -> Dict[str, str]:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
+        cleaned = re.sub(r"```$", "", cleaned).strip()
+    parsed = json.loads(cleaned)
+    if not isinstance(parsed, dict):
+        raise ValueError("模型返回格式不是 JSON 对象")
+    return {
+        "title": str(parsed.get("title", "")).strip(),
+        "start_date": str(parsed.get("start_date", "")).strip(),
+        "end_date": str(parsed.get("end_date", "")).strip(),
+        "location_text": str(parsed.get("location_text", "")).strip(),
+        "training_goal": str(parsed.get("training_goal", "")).strip(),
+    }
+
+
+def parse_notice_with_baidu_llm(notice_text: str, api_key: str) -> Dict[str, str]:
+    endpoint = "https://qianfan.baidubce.com/v2/chat/completions"
+    prompt = (
+        "你是信息抽取助手。请从以下培训通知文本提取字段，并且只输出 JSON，不要输出其它内容。"
+        "\n字段：title(培训班名称),start_date(YYYY-MM-DD),end_date(YYYY-MM-DD),location_text(培训地点),training_goal(培训目标)。"
+        "\n若某项缺失填空字符串。\n\n通知文本：\n"
+        f"{notice_text[:12000]}"
+    )
+    body = json.dumps(
+        {
+            "model": "ernie-4.5-turbo-128k",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.01,
+            "top_p": 0.8,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=40) as resp:
+        raw = resp.read().decode("utf-8")
+    payload = json.loads(raw)
+    if payload.get("error"):
+        message = payload["error"].get("message") or payload["error"].get("type") or "接口返回错误"
+        raise ValueError(message)
+
+    result_text = payload.get("result", "")
+    if not result_text and payload.get("choices"):
+        first_choice = payload["choices"][0] if payload["choices"] else {}
+        message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
+        result_text = message.get("content", "")
+    return parse_json_from_text(result_text)
+
+
+def build_map_info(location_text: str, amap_key: str) -> Dict[str, str]:
+    location_text = (location_text or "").strip()
+    if not location_text:
+        return {"map_url": "", "geo": ""}
+
+    query = urllib.parse.urlencode({"query": location_text})
+    map_url = f"https://uri.amap.com/search?{query}"
+    if not amap_key:
+        return {"map_url": map_url, "geo": ""}
+
+    geocode_params = urllib.parse.urlencode(
+        {"address": location_text, "key": amap_key, "output": "json"}
+    )
+    geocode_url = f"https://restapi.amap.com/v3/geocode/geo?{geocode_params}"
+    try:
+        req = urllib.request.Request(geocode_url, method="GET")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        geocodes = payload.get("geocodes") or []
+        if geocodes and isinstance(geocodes[0], dict):
+            geo = geocodes[0].get("location", "")
+            return {"map_url": map_url, "geo": geo}
+    except Exception:
+        app.logger.exception("Map geocode failed for location=%s", location_text)
+    return {"map_url": map_url, "geo": ""}
+
+
+@app.route("/api/session/parse_notice", methods=["POST"])
+def parse_notice_api():
+    notice_file = request.files.get("notice_file")
+    if not notice_file or not notice_file.filename:
+        return json_response(False, error="请先选择通知文件。")
+
+    suffix = Path(notice_file.filename).suffix.lower()
+    if suffix not in {".docx", ".txt"}:
+        return json_response(False, error="目前仅支持 .docx 或 .txt 通知文件解析。")
+
+    api_key = request.form.get("baidu_api_key", "").strip()
+    if not api_key:
+        return json_response(False, error="请填写百度千帆 API Key（Bearer）。")
+
+    _, file_path = save_upload(notice_file)
+    try:
+        notice_text = extract_notice_text(file_path)
+        if not notice_text.strip():
+            return json_response(False, error="通知文件未读取到有效文本，请检查文档内容。")
+        parsed = parse_notice_with_baidu_llm(notice_text, api_key)
+        return json_response(True, parsed)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        app.logger.exception("Baidu parse HTTP error: %s", detail)
+        return json_response(False, error=f"百度云接口调用失败：{detail[:300] or exc.reason}")
+    except ValueError as exc:
+        message = str(exc)
+        if "Access token invalid" in message or "Invalid authentication" in message:
+            return json_response(False, error="API Key 无效或已过期，请在百度千帆控制台重新获取后再试。")
+        return json_response(False, error=f"解析失败：{message}")
+    except Exception as exc:
+        app.logger.exception("Parse notice failed")
+        return json_response(False, error=f"解析失败：{exc}")
+
+
+def import_excel(file_path: str, source_file: str, session_id: int) -> Dict[str, Any]:
+    sheets = pd.read_excel(file_path, sheet_name=None, dtype=str, engine="openpyxl")
+    sheet_count = len(sheets)
+    valid_rows = 0
+    new_person_count = 0
+    new_enrollment_count = 0
+    exceptions: List[Dict[str, Any]] = []
+
+    with get_connection() as conn:
+        try:
+            for sheet_name, df in sheets.items():
+                if df is None or df.empty:
+                    continue
+                df = df.fillna("")
+                columns = list(df.columns)
+                phone_col = guess_column(
+                    columns, ["手机", "手机号", "电话", "mobile", "phone"]
+                )
+                if not phone_col:
+                    exceptions.append(
+                        {
+                            "sheet": sheet_name,
+                            "row": None,
+                            "reason": "未找到手机号列",
+                        }
+                    )
+                    continue
+
+                name_col = guess_column(columns, ["姓名", "name"])
+                org_col = guess_column(columns, ["单位", "机构", "company", "org"])
+                region_col = guess_column(columns, ["地区", "区域", "省", "市", "region"])
+                title_col = guess_column(columns, ["职务", "岗位", "title"])
+                remote_id_col = guess_column(columns, ["工号", "编号", "学号", "id"])
+                room_col = guess_column(columns, ["住宿", "房间", "room"])
+
+                column_index = {col: idx for idx, col in enumerate(columns)}
+                for row_index, row in enumerate(
+                    df.itertuples(index=False, name=None), start=2
+                ):
+                    values = list(row)
+                    if not row_has_data(values):
+                        continue
+                    phone_raw = row[column_index[phone_col]]
+                    phone_norm = normalize_phone(phone_raw)
+                    if not phone_norm:
+                        exceptions.append(
+                            {
+                                "sheet": sheet_name,
+                                "row": row_index,
+                                "reason": "手机号空或非法",
+                            }
+                        )
+                        continue
+
+                    name = row[column_index[name_col]] if name_col else ""
+                    org_text = row[column_index[org_col]] if org_col else ""
+                    region_text = row[column_index[region_col]] if region_col else ""
+                    title_text = row[column_index[title_col]] if title_col else ""
+                    remote_id_snapshot = (
+                        row[column_index[remote_id_col]] if remote_id_col else ""
+                    )
+                    room_preference = row[column_index[room_col]] if room_col else ""
+
+                    cursor = conn.execute(
+                        "SELECT person_id FROM person WHERE phone_norm = ?",
+                        (phone_norm,),
+                    )
+                    person_row = cursor.fetchone()
+                    if person_row:
+                        person_id = person_row["person_id"]
+                        conn.execute(
+                            """
+                            UPDATE person
+                            SET name_latest = ?, org_text_latest = ?
+                            WHERE person_id = ?
+                            """,
+                            (name or None, org_text or None, person_id),
+                        )
+                    else:
+                        cursor = conn.execute(
+                            """
+                            INSERT INTO person (phone_norm, name_latest, org_text_latest)
+                            VALUES (?, ?, ?)
+                            """,
+                            (phone_norm, name or None, org_text or None),
+                        )
+                        person_id = cursor.lastrowid
+                        new_person_count += 1
+
+                    conn.execute(
+                        """
+                        INSERT INTO enrollment (
+                            session_id,
+                            person_id,
+                            enrolled_at,
+                            name_snapshot,
+                            org_text,
+                            region_text,
+                            title_text,
+                            remote_id_snapshot,
+                            room_preference,
+                            source_file,
+                            source_sheet
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            session_id,
+                            person_id,
+                            datetime.now().isoformat(timespec="seconds"),
+                            name or None,
+                            org_text or None,
+                            region_text or None,
+                            title_text or None,
+                            remote_id_snapshot or None,
+                            room_preference or None,
+                            source_file,
+                            sheet_name,
+                        ),
+                    )
+                    new_enrollment_count += 1
+                    valid_rows += 1
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return {
+        "sheet_count": sheet_count,
+        "valid_rows": valid_rows,
+        "new_person_count": new_person_count,
+        "new_enrollment_count": new_enrollment_count,
+        "exceptions": exceptions,
+    }
+
+
+@app.route("/api/enrollment/import", methods=["POST"])
+def import_enrollment():
+    excel_file = request.files.get("excel_file")
+    if not excel_file or not excel_file.filename:
+        return json_response(False, error="请上传报名 Excel 文件。")
+    if not is_excel_filename(excel_file.filename):
+        return json_response(
+            False,
+            error="仅支持 Excel 文件（.xlsx/.xls/.xlsm/.xltx/.xltm），请重新上传。",
+        )
+
+    session_id_value = request.form.get("session_id")
+    session_id = resolve_session_id(session_id_value)
+    if not session_id:
+        return json_response(False, error="未找到可用的期次，请先创建期次。")
+
+    cursor = get_connection().execute(
+        "SELECT session_id FROM training_session WHERE session_id = ?", (session_id,)
+    )
+    if not cursor.fetchone():
+        return json_response(False, error="期次不存在，请重新创建。")
+
+    source_file, file_path = save_upload(excel_file)
+    try:
+        receipt = import_excel(file_path, source_file, session_id)
+    except Exception as exc:
+        return json_response(False, error=f"导入失败: {exc}")
+
+    return json_response(True, receipt)
+
+
+
+
+def normalize_cell_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def find_course_column_indexes(headers: List[str]) -> Optional[Dict[str, int]]:
+    mapping: Dict[str, int] = {}
+    for idx, header in enumerate(headers):
+        h = normalize_cell_text(header)
+        if any(key in h for key in ["日期", "日 期"]):
+            mapping["date"] = idx
+        elif any(key in h for key in ["时间", "时 间"]):
+            mapping["time"] = idx
+        elif any(key in h for key in ["内容", "课程", "课程名称"]):
+            mapping["course"] = idx
+        elif any(key in h for key in ["授课教师", "教师", "老师"]):
+            mapping["teacher"] = idx
+
+    if "course" not in mapping:
+        return None
+    return mapping
+
+
+def parse_date_text(date_text: str, default_year: int) -> Optional[date]:
+    text = normalize_cell_text(date_text)
+    if not text:
+        return None
+    nums = re.findall(r"\d+", text)
+    if len(nums) >= 3:
+        year, month, day = int(nums[0]), int(nums[1]), int(nums[2])
+    elif len(nums) >= 2:
+        year, month, day = default_year, int(nums[0]), int(nums[1])
+    else:
+        return None
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def parse_time_range(time_text: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+    text = normalize_cell_text(time_text).replace("：", ":")
+    times = re.findall(r"(\d{1,2}:\d{2})", text)
+    if len(times) >= 2:
+        return times[0], times[1]
+    if len(times) == 1:
+        return times[0], None
+    return None, None
+
+
+def combine_date_time(day: Optional[date], time_val: Optional[str]) -> Optional[str]:
+    if not day:
+        return None
+    if not time_val:
+        return datetime(day.year, day.month, day.day, 0, 0).isoformat(timespec="seconds")
+    hour, minute = [int(x) for x in time_val.split(":", 1)]
+    return datetime(day.year, day.month, day.day, hour, minute).isoformat(timespec="seconds")
+
+
+def parse_course_rows_from_word(
+    file_path: str, default_year: int, location_text: str = "", session_id: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    document = Document(file_path)
+    records: List[Dict[str, Any]] = []
+
+
 
 
 @app.route("/api/session/history")

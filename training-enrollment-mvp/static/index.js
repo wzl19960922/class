@@ -479,16 +479,25 @@ async function fetchFinanceList() {
       <div class="task-item">
         <div><strong>#${row.record_no || ""} ${row.name || ""}</strong></div>
         <div>手机：${row.phone || ""}</div>
+        <div>身份证号：${row.id_card || ""}</div>
         <div>单位：${row.org_name || ""}</div>
         <div>职务：${row.job_title || ""}</div>
         <div>开户行：${row.bank_name || ""}</div>
         <div>银行卡：${row.bank_card || ""}</div>
-        <div>答题时间：${row.start_time || ""} ~ ${row.end_time || ""}</div>
       </div>
     `).join("");
   } catch (error) {
     financeList.innerHTML = `<p class="error">加载财务记录失败：${error.message}</p>`;
   }
+}
+
+function exportFinanceTeachersBySession() {
+  const sessionId = document.getElementById("finance-export-session-id").value.trim();
+  if (!/^\d+$/.test(sessionId)) {
+    showResult(financeImportResult, "请输入合法的 session_id 后再导出。", true);
+    return;
+  }
+  window.location.href = `/api/finance/export/session_teachers?session_id=${encodeURIComponent(sessionId)}`;
 }
 
 async function markTaskSent(taskId) {
@@ -600,6 +609,7 @@ function bindEvents() {
   document.getElementById("refresh-logs").addEventListener("click", fetchLogs);
   document.getElementById("finance-import").addEventListener("click", importFinanceCsv);
   document.getElementById("finance-search-btn").addEventListener("click", fetchFinanceList);
+  document.getElementById("finance-export-teachers").addEventListener("click", exportFinanceTeachersBySession);
 
   historyList.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action='edit-session']");
