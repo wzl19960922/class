@@ -70,6 +70,17 @@ python -m app.cli
 
 本项目的 `main.py` 只做本地导入与统计，不依赖 Flask。
 
+### Windows PowerShell：从 `git pull` 到运行成功（6 条最短命令）
+
+```powershell
+git pull
+if (Test-Path .venv) { Remove-Item -Recurse -Force .venv }
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install pandas openpyxl
+.\.venv\Scripts\python.exe -m app.cli
+```
+
 ## Excel 导入示例
 
 ```python
