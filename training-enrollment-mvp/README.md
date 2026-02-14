@@ -55,6 +55,24 @@ Get-Content .\scripts\schema.sql | mysql -u root -p
 cmd /c "mysql -u root -p < scripts\schema.sql"
 ```
 
+### 能不能直接删报错那几行？（不建议）
+
+不建议直接删。你现在的报错来自 `main.py` 被冲突内容污染，直接删几行通常会留下更多隐藏问题（例如路由、导入、缩进或依赖关系被破坏）。
+
+请优先用下面两种方式之一恢复：
+
+```powershell
+.\repair_windows_main.ps1
+```
+
+或手动执行：
+
+```bash
+git restore main.py app/cli.py run_windows.ps1 README.md
+git pull
+python -m app.cli
+```
+
 ### 一键修复 `main.py` 被冲突污染（Windows PowerShell）
 
 在项目根目录执行：
