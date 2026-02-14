@@ -55,6 +55,16 @@ Get-Content .\scripts\schema.sql | mysql -u root -p
 cmd /c "mysql -u root -p < scripts\schema.sql"
 ```
 
+### 一键修复 `main.py` 被冲突污染（Windows PowerShell）
+
+在项目根目录执行：
+
+```powershell
+.\repair_windows_main.ps1
+```
+
+该脚本会自动执行 `git restore main.py app/cli.py run_windows.ps1 README.md` 和 `git pull`，然后提示你用 `python -m app.cli` 运行。
+
 ### 如果 `python main.py` 出现 Flask 路由重复报错
 
 若你看到类似 `AssertionError: View function mapping is overwriting...`，说明你本地 `main.py` 很可能被冲突合并内容污染（混入了其他 Flask 项目代码）。
