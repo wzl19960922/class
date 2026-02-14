@@ -23,7 +23,7 @@ main.py
 .\run_windows.ps1
 ```
 
-> 说明：脚本会自动创建虚拟环境、安装依赖并运行 `main.py`。
+> 说明：脚本会自动创建虚拟环境、安装依赖并运行 `python -m app.cli`。
 
 ### 通用（Linux/macOS）
 
@@ -31,7 +31,7 @@ main.py
 python3 -m venv .venv
 source .venv/bin/activate
 pip install pandas openpyxl
-python main.py
+python -m app.cli
 ```
 
 运行后将创建数据库并导入 `data/sample_enrollments.csv`（同样支持 Excel），输出年度统计结果。
@@ -57,15 +57,15 @@ cmd /c "mysql -u root -p < scripts\schema.sql"
 
 ### 如果 `python main.py` 出现 Flask 路由重复报错
 
-若你看到类似 `AssertionError: View function mapping is overwriting...`，说明你本地 `main.py` 不是本项目的 CLI 入口（很可能是冲突合并后残留了其他项目的 Flask 代码）。
+若你看到类似 `AssertionError: View function mapping is overwriting...`，说明你本地 `main.py` 很可能被冲突合并内容污染（混入了其他 Flask 项目代码）。
 
-可在仓库根目录执行以下命令恢复：
+可在仓库根目录执行以下命令恢复（并优先使用模块入口，避免受 `main.py` 文件名冲突影响）：
 
 ```bash
 git status
 git restore main.py
 git pull
-python main.py
+python -m app.cli
 ```
 
 本项目的 `main.py` 只做本地导入与统计，不依赖 Flask。
