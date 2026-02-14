@@ -28,4 +28,4 @@ Write-Host "Installing dependencies..." -ForegroundColor Yellow
 & $venvPython -m pip install pandas openpyxl
 
 Write-Host "Running application..." -ForegroundColor Green
-& $venvPython -m app.cli
+& $venvPython main.py

@@ -23,7 +23,7 @@ main.py
 .\run_windows.ps1
 ```
 
-> 说明：脚本会自动创建虚拟环境、安装依赖并运行 `python -m app.cli`。
+> 说明：脚本会自动创建虚拟环境、安装依赖并运行 `python main.py`。
 
 ### 通用（Linux/macOS）
 
@@ -31,7 +31,7 @@ main.py
 python3 -m venv .venv
 source .venv/bin/activate
 pip install pandas openpyxl
-python -m app.cli
+python main.py
 ```
 
 运行后将创建数据库并导入 `data/sample_enrollments.csv`（同样支持 Excel），输出年度统计结果。
@@ -54,6 +54,16 @@ Get-Content .\scripts\schema.sql | mysql -u root -p
 ```powershell
 cmd /c "mysql -u root -p < scripts\schema.sql"
 ```
+
+### 如果出现 `No module named app.cli`
+
+优先直接运行：
+
+```powershell
+python main.py
+```
+
+当前项目的 `main.py` 已包含路径回退加载逻辑，可在部分 Windows/conda 场景下绕过模块解析异常。
 
 ### Flask 重复 endpoint 的最短修法（针对你当前报错）
 
@@ -92,7 +102,7 @@ def import_enrollment_v2():
 ```bash
 git restore main.py app/cli.py run_windows.ps1 README.md
 git pull
-python -m app.cli
+python main.py
 ```
 
 ### 一键修复 `main.py` 被冲突污染（Windows PowerShell）
@@ -103,7 +113,7 @@ python -m app.cli
 .\repair_windows_main.ps1
 ```
 
-该脚本会自动执行 `git restore main.py app/cli.py run_windows.ps1 README.md` 和 `git pull`，然后提示你用 `python -m app.cli` 运行。
+该脚本会自动执行 `git restore main.py app/cli.py run_windows.ps1 README.md` 和 `git pull`，然后提示你用 `python main.py` 运行。
 
 ### 如果 `python main.py` 出现 Flask 路由重复报错
 
@@ -115,7 +125,7 @@ python -m app.cli
 git status
 git restore main.py
 git pull
-python -m app.cli
+python main.py
 ```
 
 本项目的 `main.py` 只做本地导入与统计，不依赖 Flask。
@@ -128,7 +138,7 @@ if (Test-Path .venv) { Remove-Item -Recurse -Force .venv }
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install pandas openpyxl
-.\.venv\Scripts\python.exe -m app.cli
+.\.venv\Scripts\python.exe main.py
 ```
 
 ## Excel 导入示例
