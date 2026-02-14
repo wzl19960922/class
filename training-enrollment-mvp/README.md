@@ -55,6 +55,28 @@ Get-Content .\scripts\schema.sql | mysql -u root -p
 cmd /c "mysql -u root -p < scripts\schema.sql"
 ```
 
+### Flask 重复 endpoint 的最短修法（针对你当前报错）
+
+如果你运行的本地 `main.py` 里确实有 Flask 路由（`@app.route`），并报错：
+`AssertionError: View function mapping is overwriting an existing endpoint function: import_enrollment`，可按下面步骤处理。
+
+1. 在项目目录定位重复定义（PowerShell）：
+
+```powershell
+Select-String .\main.py -Pattern "def import_enrollment" -SimpleMatch
+Select-String .\main.py -Pattern "/api/enrollment/import" -SimpleMatch
+```
+
+2. 把其中一处改成唯一 endpoint + 唯一函数名（推荐改靠近报错行号那处）：
+
+```python
+@app.route("/api/enrollment/import", methods=["POST"], endpoint="import_enrollment_v2")
+def import_enrollment_v2():
+    ...
+```
+
+这样不改业务逻辑，只是避免 Flask 把两个视图当成同一个 endpoint。
+
 ### 能不能直接删报错那几行？（不建议）
 
 不建议直接删。你现在的报错来自 `main.py` 被冲突内容污染，直接删几行通常会留下更多隐藏问题（例如路由、导入、缩进或依赖关系被破坏）。
