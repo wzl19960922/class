@@ -20,7 +20,7 @@ import pandas as pd
 import qrcode
 from docx import Document
 from werkzeug.exceptions import HTTPException
-from flask import Flask, Response, jsonify, render_template, request, send_file
+from flask import Flask, Response, jsonify, render_template, request, send_file, send_from_directory
 
 try:
     import PIL  # noqa: F401
@@ -29,7 +29,6 @@ except Exception:
     QR_PIL_AVAILABLE = False
 
 BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
 DB_PATH = BASE_DIR / "training.db"
 UPLOAD_DIR = BASE_DIR / "uploads"
 LOG_DIR = BASE_DIR / "logs"
@@ -269,12 +268,9 @@ def handle_exception(exc: Exception):
     return Response("Internal Server Error", status=500, mimetype="text/plain")
 
 
-@app.route("/favicon.ico")
+@app.get("/favicon.ico")
 def favicon():
-    favicon_path = STATIC_DIR / "favicon.ico"
-    if favicon_path.exists():
-        return app.send_static_file("favicon.ico")
-    return Response(status=204)
+    return send_from_directory(app.static_folder, "favicon.ico")
 
 
 @app.route("/", endpoint="home_page")
