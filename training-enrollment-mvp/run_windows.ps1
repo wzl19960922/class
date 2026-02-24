@@ -30,29 +30,50 @@ function Ensure-Conda {
 function Ensure-EnvWithConda {
     param(
         [string]$CondaExe,
-        [string]$EnvName
+        [string]$EnvName,
+        [string]$PreferredEnvPrefix = "D:\conda\envs\training-mvp"
     )
 
     Write-Host "检测到 Conda，准备环境: $EnvName" -ForegroundColor Yellow
 
-    $envExists = (& $CondaExe env list | Select-String -Pattern "^$EnvName\s|[\\/]$EnvName$")
-    if (-not $envExists) {
-        Write-Host "创建 Conda 环境 $EnvName ..." -ForegroundColor Yellow
-        & $CondaExe create -n $EnvName python=3.11 -y
+    $runByPrefix = $false
+    if ($PreferredEnvPrefix -and (Test-Path $PreferredEnvPrefix)) {
+        $runByPrefix = $true
+        Write-Host "优先使用固定环境路径: $PreferredEnvPrefix" -ForegroundColor Yellow
+    } else {
+        $envExists = (& $CondaExe env list | Select-String -Pattern "^$EnvName\s|[\\/]$EnvName$")
+        if (-not $envExists) {
+            Write-Host "创建 Conda 环境 $EnvName ..." -ForegroundColor Yellow
+            & $CondaExe create -n $EnvName python=3.11 -y
+        }
     }
 
     Write-Host "安装依赖..." -ForegroundColor Yellow
-    & $CondaExe run -n $EnvName python -m pip install --upgrade pip
-    & $CondaExe run -n $EnvName python -m pip install flask pandas openpyxl python-docx qrcode[pil]
+    if ($runByPrefix) {
+        & $CondaExe run -p $PreferredEnvPrefix python -m pip install --upgrade pip
+        & $CondaExe run -p $PreferredEnvPrefix python -m pip install flask pandas openpyxl python-docx qrcode[pil]
 
-    Write-Host "当前将使用以下解释器启动：" -ForegroundColor Yellow
-    & $CondaExe run -n $EnvName python -c "import sys; print(sys.executable)"
+        Write-Host "当前将使用以下解释器启动：" -ForegroundColor Yellow
+        & $CondaExe run -p $PreferredEnvPrefix python -c "import sys; print(sys.executable)"
 
-    Write-Host "运行环境检查..." -ForegroundColor Yellow
-    & $CondaExe run -n $EnvName python env_check.py
+        Write-Host "运行环境检查..." -ForegroundColor Yellow
+        & $CondaExe run -p $PreferredEnvPrefix python env_check.py
 
-    Write-Host "启动服务: http://127.0.0.1:5000" -ForegroundColor Green
-    & $CondaExe run -n $EnvName python main.py
+        Write-Host "启动服务: http://127.0.0.1:5000" -ForegroundColor Green
+        & $CondaExe run -p $PreferredEnvPrefix python main.py
+    } else {
+        & $CondaExe run -n $EnvName python -m pip install --upgrade pip
+        & $CondaExe run -n $EnvName python -m pip install flask pandas openpyxl python-docx qrcode[pil]
+
+        Write-Host "当前将使用以下解释器启动：" -ForegroundColor Yellow
+        & $CondaExe run -n $EnvName python -c "import sys; print(sys.executable)"
+
+        Write-Host "运行环境检查..." -ForegroundColor Yellow
+        & $CondaExe run -n $EnvName python env_check.py
+
+        Write-Host "启动服务: http://127.0.0.1:5000" -ForegroundColor Green
+        & $CondaExe run -n $EnvName python main.py
+    }
 }
 
 function Ensure-EnvWithVenv {

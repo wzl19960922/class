@@ -19,7 +19,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import qrcode
 from docx import Document
-from flask import Flask, jsonify, render_template, request, send_file
+from werkzeug.exceptions import HTTPException
+from flask import Flask, Response, jsonify, render_template, request, send_file
 
 try:
     import PIL  # noqa: F401
@@ -258,10 +259,21 @@ def json_response(ok: bool, data: Any = None, error: Optional[str] = None):
 
 @app.errorhandler(Exception)
 def handle_exception(exc: Exception):
+    if isinstance(exc, HTTPException):
+        return exc
+
     app.logger.exception("Unhandled exception on %s %s", request.method, request.path)
     if request.path.startswith("/api/"):
         return json_response(False, error=f"服务异常: {exc}"), 500
-    raise exc
+    return Response("Internal Server Error", status=500, mimetype="text/plain")
+
+
+@app.route("/favicon.ico")
+def favicon():
+    favicon_path = STATIC_DIR / "favicon.ico"
+    if favicon_path.exists():
+        return app.send_static_file("favicon.ico")
+    return Response(status=204)
 
 
 @app.route("/", endpoint="home_page")

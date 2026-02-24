@@ -18,7 +18,7 @@ run_windows.cmd
 > 否则很可能落到 `base` 环境并报 `No module named qrcode/pandas`。
 
 脚本会自动：
-1. 优先使用 Conda（环境名 `training-mvp`），若无 Conda 则回退 `.venv`；
+1. 优先使用 `D:\conda\envs\training-mvp`（存在时按路径强制使用），否则使用环境名 `training-mvp`，若无 Conda 则回退 `.venv`；
 2. 安装依赖 `flask pandas openpyxl python-docx qrcode[pil]`；
 3. 运行 `env_check.py`；
 4. 启动服务 `http://127.0.0.1:5000`。
@@ -42,6 +42,13 @@ cd D:\survey\class\training-enrollment-mvp
 ```
 
 脚本会自动找 Conda 并使用 `training-mvp` 环境启动。
+
+### 浏览器访问后日志里出现 `/favicon.ico` 500
+
+这是因为浏览器会自动请求 `/favicon.ico`，原先后端的全局异常处理把普通的 404 又抛成了 500，导致控制台反复刷错误。新版已修复为：
+
+- `/favicon.ico` 找不到时返回 `204`（不报错）；
+- 全局异常处理遇到 HTTP 404/405 这类标准异常时不再转成 500。
 
 ### 1) `View function mapping is overwriting an existing endpoint function: index`
 ### 2) `View function mapping is overwriting an existing endpoint function: import_course_word`
