@@ -281,7 +281,10 @@
       <div class="modal-block">
         <h4>② 重新上传课程表（Word）</h4>
         <p class="inline-tip">已上传材料（可滚动查看，判断是否需要重新上传）：</p>
-        <div id="session-course-material-list" class="material-scroll-box"></div>
+        <div id="session-course-preview-panel" class="hidden">
+          <div id="session-course-preview-summary" class="inline-tip"></div>
+          <div id="session-course-material-list" class="material-scroll-box"></div>
+        </div>
         <label>课程表 Word 文件（.docx）</label>
         <input type="file" id="session-edit-course-word" accept=".docx" />
         <div class="modal-actions">
@@ -293,7 +296,10 @@
         <h4>③ 重新上传学员名单（报名 Excel）</h4>
         <p class="inline-tip">可只改任意一项后直接保存，不需要完成全部步骤。</p>
         <p class="inline-tip">已上传材料（可滚动查看，判断是否需要重新上传）：</p>
-        <div id="session-enrollment-material-list" class="material-scroll-box"></div>
+        <div id="session-enrollment-preview-panel" class="hidden">
+          <div id="session-enrollment-preview-summary" class="inline-tip"></div>
+          <div id="session-enrollment-material-list" class="material-scroll-box"></div>
+        </div>
         <label>报名 Excel 文件</label>
         <input type="file" id="session-edit-enrollment-file" accept=".xlsx,.xls,.xlsm,.xltx,.xltm" />
         <div class="modal-actions">

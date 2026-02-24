@@ -18,6 +18,10 @@ const sessionEditModal = document.getElementById("session-edit-modal");
 const sessionEditResult = document.getElementById("session-edit-result");
 const sessionCourseMaterialList = document.getElementById("session-course-material-list");
 const sessionEnrollmentMaterialList = document.getElementById("session-enrollment-material-list");
+const sessionCoursePreviewPanel = document.getElementById("session-course-preview-panel");
+const sessionEnrollmentPreviewPanel = document.getElementById("session-enrollment-preview-panel");
+const sessionCoursePreviewSummary = document.getElementById("session-course-preview-summary");
+const sessionEnrollmentPreviewSummary = document.getElementById("session-enrollment-preview-summary");
 
 let currentSessionId = null;
 
@@ -39,24 +43,63 @@ function showResult(el, html, isError = false) {
   el.innerHTML = isError ? `<p class="error">${html}</p>` : html;
 }
 
-function renderSourceFiles(container, files, emptyText) {
-  if (!container) return;
-  if (!files || !files.length) {
-    container.innerHTML = `<div class="inline-tip">${emptyText}</div>`;
+function renderCoursePreview(data) {
+  if (!sessionCoursePreviewPanel || !sessionCourseMaterialList) return;
+  const rows = data.course_preview_rows || [];
+  const total = Number(data.course_total_count || 0);
+  if (!rows.length) {
+    sessionCoursePreviewPanel.classList.add("hidden");
+    sessionCourseMaterialList.innerHTML = "";
+    if (sessionCoursePreviewSummary) sessionCoursePreviewSummary.textContent = "";
     return;
   }
-  container.innerHTML = files.map((item) => `
+  sessionCoursePreviewPanel.classList.remove("hidden");
+  if (sessionCoursePreviewSummary) {
+    sessionCoursePreviewSummary.textContent = `已上传课程内容（前 ${rows.length} 行，共 ${total} 行）`;
+  }
+  sessionCourseMaterialList.innerHTML = rows.map((item, idx) => `
     <div class="material-item">
-      <div><strong>${item.source_file}</strong></div>
-      <div class="inline-tip">导入次数：${item.import_count || 0}；最近导入：${item.latest_at || ""}</div>
+      <div><strong>${idx + 1}. ${item.title || "(无课程名)"}</strong></div>
+      <div class="inline-tip">讲师：${item.teacher || ""}；时间：${item.start_at || ""}${item.end_at ? ` ~ ${item.end_at}` : ""}；地点：${item.location || ""}</div>
     </div>
   `).join("");
 }
 
+function renderEnrollmentPreview(data) {
+  if (!sessionEnrollmentPreviewPanel || !sessionEnrollmentMaterialList) return;
+  const rows = data.enrollment_preview_rows || [];
+  const total = Number(data.enrollment_total_count || 0);
+  if (!rows.length) {
+    sessionEnrollmentPreviewPanel.classList.add("hidden");
+    sessionEnrollmentMaterialList.innerHTML = "";
+    if (sessionEnrollmentPreviewSummary) sessionEnrollmentPreviewSummary.textContent = "";
+    return;
+  }
+  sessionEnrollmentPreviewPanel.classList.remove("hidden");
+  if (sessionEnrollmentPreviewSummary) {
+    sessionEnrollmentPreviewSummary.textContent = `已上传学员内容（前 ${rows.length} 行，共 ${total} 行）`;
+  }
+  sessionEnrollmentMaterialList.innerHTML = rows.map((item, idx) => `
+    <div class="material-item">
+      <div><strong>${idx + 1}. ${item.name_snapshot || item.name_latest || "(无姓名)"}</strong></div>
+      <div class="inline-tip">手机：${item.phone_norm || ""}；单位：${item.org_text || ""}；地区：${item.region_text || ""}；职务：${item.title_text || ""}</div>
+    </div>
+  `).join("");
+}
+
+function clearSessionMaterialPreviews() {
+  if (sessionCoursePreviewPanel) sessionCoursePreviewPanel.classList.add("hidden");
+  if (sessionEnrollmentPreviewPanel) sessionEnrollmentPreviewPanel.classList.add("hidden");
+  if (sessionCourseMaterialList) sessionCourseMaterialList.innerHTML = "";
+  if (sessionEnrollmentMaterialList) sessionEnrollmentMaterialList.innerHTML = "";
+  if (sessionCoursePreviewSummary) sessionCoursePreviewSummary.textContent = "";
+  if (sessionEnrollmentPreviewSummary) sessionEnrollmentPreviewSummary.textContent = "";
+}
+
 async function refreshSessionMaterialLists(sessionId) {
   const data = await handleResponse(await fetch(`/api/session/${sessionId}`));
-  renderSourceFiles(sessionCourseMaterialList, data.course_source_files || [], "暂无已上传课程表材料");
-  renderSourceFiles(sessionEnrollmentMaterialList, data.enrollment_source_files || [], "暂无已上传学员名单材料");
+  renderCoursePreview(data);
+  renderEnrollmentPreview(data);
   return data;
 }
 
@@ -108,8 +151,7 @@ function openSessionEditModal() {
 function closeSessionEditModal() {
   sessionEditModal.classList.remove("show");
   sessionEditResult.innerHTML = "";
-  renderSourceFiles(sessionCourseMaterialList, [], "暂无已上传课程表材料");
-  renderSourceFiles(sessionEnrollmentMaterialList, [], "暂无已上传学员名单材料");
+  clearSessionMaterialPreviews();
 }
 
 async function fetchStats() {

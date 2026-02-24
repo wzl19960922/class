@@ -339,30 +339,41 @@ def get_session(session_id: int):
         if not row:
             return json_response(False, error="期次不存在。")
 
-        course_files = conn.execute(
+        course_rows = conn.execute(
             """
-            SELECT source_file, COUNT(*) AS import_count, MAX(created_at) AS latest_at
+            SELECT title, teacher, start_at, end_at, location
             FROM course
-            WHERE session_id = ? AND COALESCE(TRIM(source_file), '') <> ''
-            GROUP BY source_file
-            ORDER BY latest_at DESC, source_file DESC
+            WHERE session_id = ?
+            ORDER BY COALESCE(start_at, ''), course_id
+            LIMIT 8
             """,
             (session_id,),
         ).fetchall()
-        enrollment_files = conn.execute(
+        enrollment_rows = conn.execute(
             """
-            SELECT source_file, COUNT(*) AS import_count, MAX(enrolled_at) AS latest_at
-            FROM enrollment
-            WHERE session_id = ? AND COALESCE(TRIM(source_file), '') <> ''
-            GROUP BY source_file
-            ORDER BY latest_at DESC, source_file DESC
+            SELECT e.name_snapshot, p.name_latest, p.phone_norm, e.org_text, e.region_text, e.title_text
+            FROM enrollment e
+            LEFT JOIN person p ON p.person_id = e.person_id
+            WHERE e.session_id = ?
+            ORDER BY e.enrollment_id
+            LIMIT 8
             """,
             (session_id,),
         ).fetchall()
+        course_total_row = conn.execute(
+            "SELECT COUNT(*) AS total FROM course WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        enrollment_total_row = conn.execute(
+            "SELECT COUNT(*) AS total FROM enrollment WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
 
     payload = dict(row)
-    payload["course_source_files"] = [dict(item) for item in course_files]
-    payload["enrollment_source_files"] = [dict(item) for item in enrollment_files]
+    payload["course_preview_rows"] = [dict(item) for item in course_rows]
+    payload["enrollment_preview_rows"] = [dict(item) for item in enrollment_rows]
+    payload["course_total_count"] = int(course_total_row["total"]) if course_total_row else 0
+    payload["enrollment_total_count"] = int(enrollment_total_row["total"]) if enrollment_total_row else 0
     return json_response(True, payload)
 
 
