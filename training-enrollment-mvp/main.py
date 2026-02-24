@@ -1635,6 +1635,92 @@ def export_session_teachers_finance():
 
 
 
+def build_session_date_range_text(start_date: str, end_date: str) -> Tuple[str, str]:
+    start_text = (start_date or "").strip()[:10]
+    end_text = (end_date or "").strip()[:10]
+    if start_text and end_text:
+        date_range = f"{start_text} ~ {end_text}"
+    else:
+        date_range = start_text or end_text
+
+    day_count = ""
+    if start_text and end_text:
+        try:
+            start_obj = datetime.fromisoformat(start_text).date()
+            end_obj = datetime.fromisoformat(end_text).date()
+            if end_obj >= start_obj:
+                day_count = str((end_obj - start_obj).days + 1)
+        except ValueError:
+            day_count = ""
+    return date_range, day_count
+
+
+@app.route("/api/session/export/signbook")
+def export_session_signbook():
+    session_id_text = request.args.get("session_id", "").strip()
+    if not session_id_text.isdigit():
+        return json_response(False, error="请提供合法 session_id。")
+    session_id = int(session_id_text)
+
+    with get_connection() as conn:
+        session_row = conn.execute(
+            """
+            SELECT session_id, title, start_date, end_date
+            FROM training_session
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        if not session_row:
+            return json_response(False, error="培训班不存在。")
+
+        enrollments = conn.execute(
+            """
+            SELECT e.enrollment_id, e.name_snapshot, e.org_text, e.title_text, p.name_latest
+            FROM enrollment e
+            LEFT JOIN person p ON p.person_id = e.person_id
+            WHERE e.session_id = ?
+            ORDER BY e.enrollment_id
+            """,
+            (session_id,),
+        ).fetchall()
+
+    if not enrollments:
+        return json_response(False, error="该培训班暂无学员名单，无法制作签到册。")
+
+    date_range, day_count = build_session_date_range_text(
+        session_row["start_date"] or "", session_row["end_date"] or ""
+    )
+
+    export_rows: List[Dict[str, Any]] = []
+    for idx, row in enumerate(enrollments, start=1):
+        export_rows.append(
+            {
+                "序号": idx,
+                "姓名": (row["name_snapshot"] or row["name_latest"] or "").strip(),
+                "性别": "",
+                "工作单位": row["org_text"] or "",
+                "职务/职称": row["title_text"] or "",
+                "参加会议(培训)起止日期": date_range,
+                "参加会议(培训)天数": day_count,
+                "参加会议(培训)代表签字": "",
+            }
+        )
+
+    df = pd.DataFrame(export_rows)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="会议(培训)代表签到册")
+    output.seek(0)
+    filename = f"session_{session_id}_会议培训代表签到册.xlsx"
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
 @app.route("/api/session/history")
 def session_history():
     with get_connection() as conn:

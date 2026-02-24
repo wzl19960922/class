@@ -16,6 +16,9 @@ const newEnrollmentSessionTip = document.getElementById("new-enrollment-session-
 
 const sessionEditModal = document.getElementById("session-edit-modal");
 const sessionEditResult = document.getElementById("session-edit-result");
+const sessionMaterialModal = document.getElementById("session-material-modal");
+const sessionMaterialTitle = document.getElementById("session-material-title");
+const sessionMaterialResult = document.getElementById("session-material-result");
 const sessionCourseMaterialList = document.getElementById("session-course-material-list");
 const sessionEnrollmentMaterialList = document.getElementById("session-enrollment-material-list");
 const sessionCoursePreviewPanel = document.getElementById("session-course-preview-panel");
@@ -24,6 +27,7 @@ const sessionCoursePreviewSummary = document.getElementById("session-course-prev
 const sessionEnrollmentPreviewSummary = document.getElementById("session-enrollment-preview-summary");
 
 let currentSessionId = null;
+let currentMaterialSessionId = null;
 
 async function handleResponse(resp) {
   const contentType = resp.headers.get("content-type") || "";
@@ -154,6 +158,61 @@ function closeSessionEditModal() {
   clearSessionMaterialPreviews();
 }
 
+
+function openSessionMaterialModal(sessionItem) {
+  currentMaterialSessionId = Number(sessionItem.session_id);
+  if (sessionMaterialTitle) {
+    sessionMaterialTitle.textContent = `制作材料 - #${sessionItem.session_id} ${sessionItem.title || "未命名培训班"}`;
+  }
+  if (sessionMaterialResult) {
+    sessionMaterialResult.innerHTML = "";
+  }
+  sessionMaterialModal.classList.add("show");
+}
+
+function closeSessionMaterialModal() {
+  currentMaterialSessionId = null;
+  sessionMaterialModal.classList.remove("show");
+  if (sessionMaterialResult) {
+    sessionMaterialResult.innerHTML = "";
+  }
+}
+
+async function exportSessionSignbook() {
+  if (!currentMaterialSessionId || currentMaterialSessionId <= 0) {
+    if (sessionMaterialResult) {
+      sessionMaterialResult.innerHTML = '<p class="error">未选择培训班，无法导出签到册。</p>';
+    }
+    return;
+  }
+  const url = `/api/session/export/signbook?session_id=${encodeURIComponent(String(currentMaterialSessionId))}`;
+  try {
+    const resp = await fetch(url);
+    const contentType = resp.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const payload = await resp.json();
+      throw new Error(payload.error || "导出失败");
+    }
+    const blob = await resp.blob();
+    const downloadName = `session_${currentMaterialSessionId}_会议培训代表签到册.xlsx`;
+    const tempUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = tempUrl;
+    link.download = downloadName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(tempUrl);
+    if (sessionMaterialResult) {
+      sessionMaterialResult.innerHTML = "<p>签到册已生成并开始下载。</p>";
+    }
+  } catch (error) {
+    if (sessionMaterialResult) {
+      sessionMaterialResult.innerHTML = `<p class="error">导出签到册失败：${error.message}</p>`;
+    }
+  }
+}
+
 async function fetchStats() {
   const year = document.getElementById("year").value.trim();
   if (!/^\d{4}$/.test(year)) {
@@ -191,7 +250,10 @@ async function fetchHistory() {
         <div>地点：${item.location_text || ""}</div>
         <div>培训目标：${item.training_goal || ""}</div>
         <div>报名人次：${item.enrollment_count || 0}</div>
-        <button data-action="edit-session" data-session-id="${item.session_id}">修改</button>
+        <div class="history-actions">
+          <button data-action="edit-session" data-session-id="${item.session_id}">修改</button>
+          <button data-action="make-material" data-session-id="${item.session_id}" data-session-title="${(item.title || "").replace(/"/g, "&quot;")}">制作材料</button>
+        </div>
       </div>
     `).join("");
   } catch (error) {
@@ -670,6 +732,8 @@ function bindEvents() {
   document.getElementById("refresh-history").addEventListener("click", fetchHistory);
 
   document.getElementById("close-session-edit").addEventListener("click", closeSessionEditModal);
+  document.getElementById("close-session-material").addEventListener("click", closeSessionMaterialModal);
+  document.getElementById("export-session-signbook").addEventListener("click", exportSessionSignbook);
   document.getElementById("save-session-edit").addEventListener("click", saveSessionEdit);
   document.getElementById("reimport-session-course").addEventListener("click", reimportSessionCourse);
   document.getElementById("reimport-session-enrollment").addEventListener("click", reimportSessionEnrollment);
@@ -682,9 +746,18 @@ function bindEvents() {
   document.getElementById("finance-export-teachers").addEventListener("click", exportFinanceTeachersBySession);
 
   historyList.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-action='edit-session']");
+    const button = event.target.closest("button[data-action]");
     if (!button) return;
-    editSession(Number(button.dataset.sessionId));
+    if (button.dataset.action === "edit-session") {
+      editSession(Number(button.dataset.sessionId));
+      return;
+    }
+    if (button.dataset.action === "make-material") {
+      openSessionMaterialModal({
+        session_id: Number(button.dataset.sessionId),
+        title: button.dataset.sessionTitle || "",
+      });
+    }
   });
 
   todayTaskList.addEventListener("click", async (event) => {

@@ -88,6 +88,7 @@
       padding: 10px;
     }
     .history-item, .task-item { border-bottom: 1px dashed #d8e2f0; padding: 10px 4px; }
+    .history-actions { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
     .task-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .task-panel {
       border: 1px solid #d5e3fa;
@@ -198,6 +199,24 @@
     <div id="log-path" class="result"></div>
     <pre id="log-content" class="log-box"></pre>
   </section>
+
+
+  <div id="session-material-modal" class="modal-mask">
+    <div class="modal-panel" style="width:560px;">
+      <div class="modal-header">
+        <h3 id="session-material-title">制作材料</h3>
+        <button id="close-session-material">关闭</button>
+      </div>
+      <div class="modal-block">
+        <h4>① 制作会议(培训)代表签到册</h4>
+        <p class="inline-tip">导出字段：序号、姓名、性别、工作单位、职务/职称、参加会议(培训)起止日期、参加会议(培训)天数、参加会议(培训)代表签字。</p>
+        <div class="modal-actions">
+          <button id="export-session-signbook">导出签到册（Excel）</button>
+        </div>
+      </div>
+      <div id="session-material-result" class="result"></div>
+    </div>
+  </div>
 
   <div id="add-training-modal" class="modal-mask">
     <div class="modal-panel">
