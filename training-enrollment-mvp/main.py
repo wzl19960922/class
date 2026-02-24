@@ -29,6 +29,7 @@ except Exception:
     QR_PIL_AVAILABLE = False
 
 BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
 DB_PATH = BASE_DIR / "training.db"
 UPLOAD_DIR = BASE_DIR / "uploads"
 LOG_DIR = BASE_DIR / "logs"
