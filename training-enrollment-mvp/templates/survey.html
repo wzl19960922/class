@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>课后问卷</title>
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; margin: 24px; }
+    section { border: 1px solid #ddd; padding: 16px; border-radius: 6px; max-width: 640px; }
+    label { display: block; margin: 10px 0 4px; }
+    input, textarea, select { width: 100%; padding: 6px; }
+    button { margin-top: 12px; padding: 6px 16px; }
+  </style>
+</head>
+<body>
+  <section>
+    <h1>课后问卷</h1>
+    <p>课程：{{ course.title }}（老师：{{ course.teacher or "" }}）</p>
+
+    <label>1) 满意度（1-5）</label>
+    <select id="satisfaction">
+      <option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1</option>
+    </select>
+
+    <label>2) 你最大的收获是什么？</label>
+    <textarea id="gain" rows="3"></textarea>
+
+    <label>3) 你对课程的建议？</label>
+    <textarea id="suggestion" rows="3"></textarea>
+
+    <label>4) 推荐度（1-10）</label>
+    <input id="recommend" type="number" min="1" max="10" value="10" />
+
+    <button id="submit-btn">提交问卷</button>
+    <p id="msg"></p>
+  </section>
+
+  <script>
+    document.getElementById('submit-btn').addEventListener('click', async () => {
+      const payload = {
+        course_id: {{ course.course_id }},
+        satisfaction_score: Number(document.getElementById('satisfaction').value),
+        gain_text: document.getElementById('gain').value.trim(),
+        suggestion_text: document.getElementById('suggestion').value.trim(),
+        recommend_score: Number(document.getElementById('recommend').value)
+      };
+      const msg = document.getElementById('msg');
+      try {
+        const res = await fetch('/api/survey/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (!result.ok) throw new Error(result.error || '提交失败');
+        msg.textContent = '提交成功，感谢反馈！';
+      } catch (e) {
+        msg.textContent = '提交失败：' + e.message;
+      }
+    });
+  </script>
+</body>
+</html>
