@@ -113,6 +113,18 @@
     .modal-block { border: 1px solid #d7e3f8; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff; }
     .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     .modal-actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .material-scroll-box {
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8fbff;
+      padding: 8px 10px;
+      max-height: 130px;
+      overflow-y: auto;
+      font-size: 13px;
+    }
+    .material-item { padding: 6px 0; border-bottom: 1px dashed #d8e2f0; }
+    .material-item:last-child { border-bottom: none; }
     .hidden { display: none; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
     th, td { border-bottom: 1px solid #e6edf7; padding: 8px 6px; text-align: left; }
@@ -268,6 +280,8 @@
 
       <div class="modal-block">
         <h4>② 重新上传课程表（Word）</h4>
+        <p class="inline-tip">已上传材料（可滚动查看，判断是否需要重新上传）：</p>
+        <div id="session-course-material-list" class="material-scroll-box"></div>
         <label>课程表 Word 文件（.docx）</label>
         <input type="file" id="session-edit-course-word" accept=".docx" />
         <div class="modal-actions">
@@ -278,6 +292,8 @@
       <div class="modal-block">
         <h4>③ 重新上传学员名单（报名 Excel）</h4>
         <p class="inline-tip">可只改任意一项后直接保存，不需要完成全部步骤。</p>
+        <p class="inline-tip">已上传材料（可滚动查看，判断是否需要重新上传）：</p>
+        <div id="session-enrollment-material-list" class="material-scroll-box"></div>
         <label>报名 Excel 文件</label>
         <input type="file" id="session-edit-enrollment-file" accept=".xlsx,.xls,.xlsm,.xltx,.xltm" />
         <div class="modal-actions">

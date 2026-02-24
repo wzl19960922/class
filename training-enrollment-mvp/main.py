@@ -336,9 +336,34 @@ def get_session(session_id: int):
             """,
             (session_id,),
         ).fetchone()
-    if not row:
-        return json_response(False, error="期次不存在。")
-    return json_response(True, dict(row))
+        if not row:
+            return json_response(False, error="期次不存在。")
+
+        course_files = conn.execute(
+            """
+            SELECT source_file, COUNT(*) AS import_count, MAX(created_at) AS latest_at
+            FROM course
+            WHERE session_id = ? AND COALESCE(TRIM(source_file), '') <> ''
+            GROUP BY source_file
+            ORDER BY latest_at DESC, source_file DESC
+            """,
+            (session_id,),
+        ).fetchall()
+        enrollment_files = conn.execute(
+            """
+            SELECT source_file, COUNT(*) AS import_count, MAX(enrolled_at) AS latest_at
+            FROM enrollment
+            WHERE session_id = ? AND COALESCE(TRIM(source_file), '') <> ''
+            GROUP BY source_file
+            ORDER BY latest_at DESC, source_file DESC
+            """,
+            (session_id,),
+        ).fetchall()
+
+    payload = dict(row)
+    payload["course_source_files"] = [dict(item) for item in course_files]
+    payload["enrollment_source_files"] = [dict(item) for item in enrollment_files]
+    return json_response(True, payload)
 
 
 @app.route("/api/session/update", methods=["POST"])

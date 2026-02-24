@@ -16,6 +16,8 @@ const newEnrollmentSessionTip = document.getElementById("new-enrollment-session-
 
 const sessionEditModal = document.getElementById("session-edit-modal");
 const sessionEditResult = document.getElementById("session-edit-result");
+const sessionCourseMaterialList = document.getElementById("session-course-material-list");
+const sessionEnrollmentMaterialList = document.getElementById("session-enrollment-material-list");
 
 let currentSessionId = null;
 
@@ -35,6 +37,27 @@ async function handleResponse(resp) {
 function showResult(el, html, isError = false) {
   el.classList.remove("hidden");
   el.innerHTML = isError ? `<p class="error">${html}</p>` : html;
+}
+
+function renderSourceFiles(container, files, emptyText) {
+  if (!container) return;
+  if (!files || !files.length) {
+    container.innerHTML = `<div class="inline-tip">${emptyText}</div>`;
+    return;
+  }
+  container.innerHTML = files.map((item) => `
+    <div class="material-item">
+      <div><strong>${item.source_file}</strong></div>
+      <div class="inline-tip">导入次数：${item.import_count || 0}；最近导入：${item.latest_at || ""}</div>
+    </div>
+  `).join("");
+}
+
+async function refreshSessionMaterialLists(sessionId) {
+  const data = await handleResponse(await fetch(`/api/session/${sessionId}`));
+  renderSourceFiles(sessionCourseMaterialList, data.course_source_files || [], "暂无已上传课程表材料");
+  renderSourceFiles(sessionEnrollmentMaterialList, data.enrollment_source_files || [], "暂无已上传学员名单材料");
+  return data;
 }
 
 function toIsoLocal(value) {
@@ -85,6 +108,8 @@ function openSessionEditModal() {
 function closeSessionEditModal() {
   sessionEditModal.classList.remove("show");
   sessionEditResult.innerHTML = "";
+  renderSourceFiles(sessionCourseMaterialList, [], "暂无已上传课程表材料");
+  renderSourceFiles(sessionEnrollmentMaterialList, [], "暂无已上传学员名单材料");
 }
 
 async function fetchStats() {
@@ -193,7 +218,7 @@ async function createSession() {
 
 async function editSession(sessionId) {
   try {
-    const data = await handleResponse(await fetch(`/api/session/${sessionId}`));
+    const data = await refreshSessionMaterialLists(sessionId);
     document.getElementById("session-edit-id").value = String(data.session_id);
     document.getElementById("session-edit-title").value = data.title || "";
     document.getElementById("session-edit-start").value = isoToDateValue(data.start_date);
@@ -251,6 +276,7 @@ async function saveSessionEdit() {
     }
     sessionEditResult.innerHTML = html;
     document.getElementById("session-edit-notice").value = "";
+    await refreshSessionMaterialLists(sessionId);
     await fetchHistory();
     await fetchTodayTasks();
   } catch (error) {
@@ -313,6 +339,7 @@ async function reimportSessionCourse() {
     const data = await handleResponse(await fetch("/api/course/import", { method: "POST", body: formData }));
     sessionEditResult.innerHTML = `<p>课程表重新导入成功：新增 ${data.imported_courses} 条课程。</p>`;
     document.getElementById("session-edit-course-word").value = "";
+    await refreshSessionMaterialLists(sessionId);
   } catch (error) {
     sessionEditResult.innerHTML = `<p class="error">课程表导入失败：${error.message}</p>`;
   }
@@ -341,6 +368,7 @@ async function reimportSessionEnrollment() {
       <ul>${errors || "<li>无异常行</li>"}</ul>
     `;
     document.getElementById("session-edit-enrollment-file").value = "";
+    await refreshSessionMaterialLists(sessionId);
     await fetchHistory();
   } catch (error) {
     sessionEditResult.innerHTML = `<p class="error">学员名单导入失败：${error.message}</p>`;
