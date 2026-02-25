@@ -101,6 +101,13 @@ def initialize_database() -> None:
         }
         if "training_goal" not in columns:
             conn.execute("ALTER TABLE training_session ADD COLUMN training_goal TEXT")
+
+        person_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(person)").fetchall()
+        }
+        if "gender_latest" not in person_columns:
+            conn.execute("ALTER TABLE person ADD COLUMN gender_latest TEXT")
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS enrollment (
@@ -121,6 +128,12 @@ def initialize_database() -> None:
             )
             """
         )
+        enrollment_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(enrollment)").fetchall()
+        }
+        if "gender_text" not in enrollment_columns:
+            conn.execute("ALTER TABLE enrollment ADD COLUMN gender_text TEXT")
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS course (
@@ -611,8 +624,9 @@ def import_excel(file_path: str, source_file: str, session_id: int) -> Dict[str,
 
                 name_col = guess_column(columns, ["姓名", "name"])
                 org_col = guess_column(columns, ["单位", "机构", "company", "org"])
-                region_col = guess_column(columns, ["地区", "区域", "省", "市", "region"])
-                title_col = guess_column(columns, ["职务", "岗位", "title"])
+                region_col = guess_column(columns, ["地区", "区域", "省", "市", "region", "a福州", "福州"])
+                gender_col = guess_column(columns, ["性别", "gender"])
+                title_col = guess_column(columns, ["职务", "岗位", "title", "职称"])
                 remote_id_col = guess_column(columns, ["工号", "编号", "学号", "id"])
                 room_col = guess_column(columns, ["住宿", "房间", "room"])
 
@@ -638,6 +652,7 @@ def import_excel(file_path: str, source_file: str, session_id: int) -> Dict[str,
                     name = row[column_index[name_col]] if name_col else ""
                     org_text = row[column_index[org_col]] if org_col else ""
                     region_text = row[column_index[region_col]] if region_col else ""
+                    gender_text = row[column_index[gender_col]] if gender_col else ""
                     title_text = row[column_index[title_col]] if title_col else ""
                     remote_id_snapshot = (
                         row[column_index[remote_id_col]] if remote_id_col else ""
@@ -654,18 +669,18 @@ def import_excel(file_path: str, source_file: str, session_id: int) -> Dict[str,
                         conn.execute(
                             """
                             UPDATE person
-                            SET name_latest = ?, org_text_latest = ?
+                            SET name_latest = ?, org_text_latest = ?, gender_latest = COALESCE(NULLIF(?, ''), gender_latest)
                             WHERE person_id = ?
                             """,
-                            (name or None, org_text or None, person_id),
+                            (name or None, org_text or None, gender_text or None, person_id),
                         )
                     else:
                         cursor = conn.execute(
                             """
-                            INSERT INTO person (phone_norm, name_latest, org_text_latest)
-                            VALUES (?, ?, ?)
+                            INSERT INTO person (phone_norm, name_latest, org_text_latest, gender_latest)
+                            VALUES (?, ?, ?, ?)
                             """,
-                            (phone_norm, name or None, org_text or None),
+                            (phone_norm, name or None, org_text or None, gender_text or None),
                         )
                         person_id = cursor.lastrowid
                         new_person_count += 1
@@ -679,13 +694,14 @@ def import_excel(file_path: str, source_file: str, session_id: int) -> Dict[str,
                             name_snapshot,
                             org_text,
                             region_text,
+                            gender_text,
                             title_text,
                             remote_id_snapshot,
                             room_preference,
                             source_file,
                             source_sheet
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             session_id,
@@ -694,6 +710,7 @@ def import_excel(file_path: str, source_file: str, session_id: int) -> Dict[str,
                             name or None,
                             org_text or None,
                             region_text or None,
+                            gender_text or None,
                             title_text or None,
                             remote_id_snapshot or None,
                             room_preference or None,
@@ -1676,7 +1693,7 @@ def export_session_signbook():
 
         enrollments = conn.execute(
             """
-            SELECT e.enrollment_id, e.name_snapshot, e.org_text, e.title_text, p.name_latest
+            SELECT e.enrollment_id, e.name_snapshot, e.org_text, e.gender_text, e.title_text, p.name_latest, p.gender_latest
             FROM enrollment e
             LEFT JOIN person p ON p.person_id = e.person_id
             WHERE e.session_id = ?
@@ -1698,7 +1715,7 @@ def export_session_signbook():
             {
                 "序号": idx,
                 "姓名": (row["name_snapshot"] or row["name_latest"] or "").strip(),
-                "性别": "",
+                "性别": (row["gender_text"] or row["gender_latest"] or "").strip(),
                 "工作单位": row["org_text"] or "",
                 "职务/职称": row["title_text"] or "",
                 "参加会议(培训)起止日期": date_range,
