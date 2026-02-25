@@ -214,6 +214,15 @@
           <button id="export-session-signbook">导出签到册（Excel）</button>
         </div>
       </div>
+      <div class="modal-block">
+        <h4>② 制作邀请函（模板替换）</h4>
+        <p class="inline-tip">请上传邀请函模板（.docx），系统会替换：{{ORG_LIST}}、{{DATE_RANGE}}、{{START_DATE}}、{{END_DATE}}、{{CLASS_NAME}}、{{LECTURERS}}。</p>
+        <label>邀请函模板文件（.docx）</label>
+        <input type="file" id="session-invitation-template" accept=".docx" />
+        <div class="modal-actions">
+          <button id="export-session-invitation">导出邀请函（Word）</button>
+        </div>
+      </div>
       <div id="session-material-result" class="result"></div>
     </div>
   </div>

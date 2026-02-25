@@ -1738,6 +1738,208 @@ def export_session_signbook():
     )
 
 
+
+
+def format_date_cn(date_text: str) -> str:
+    value = (date_text or "").strip()[:10]
+    if not value:
+        return ""
+    try:
+        d = datetime.fromisoformat(value).date()
+        return f"{d.year}年{d.month}月{d.day}日"
+    except ValueError:
+        return value
+
+
+def build_invitation_date_values(start_date: str, end_date: str) -> Dict[str, str]:
+    start_cn = format_date_cn(start_date)
+    end_cn = format_date_cn(end_date)
+    if start_cn and end_cn:
+        date_range = f"{start_cn}至{end_cn}"
+    else:
+        date_range = start_cn or end_cn
+    return {
+        "start_date": start_cn,
+        "end_date": end_cn,
+        "date_range": date_range,
+    }
+
+
+def parse_lecturer_items(raw_text: str) -> List[Dict[str, str]]:
+    raw = (raw_text or "").strip()
+    if not raw:
+        return []
+    parts = re.split(r"[、,/，;；\n]+", raw)
+    items: List[Dict[str, str]] = []
+    for part in parts:
+        text = part.strip()
+        if not text:
+            continue
+        match = re.match(r"^\s*([^（(]+?)\s*[（(]\s*([^）)]+)\s*[）)]\s*$", text)
+        if match:
+            items.append({"name": match.group(1).strip(), "org": match.group(2).strip()})
+        else:
+            items.append({"name": text, "org": ""})
+    return items
+
+
+def build_session_invitation_data(session_id: int) -> Dict[str, Any]:
+    with get_connection() as conn:
+        session_row = conn.execute(
+            """
+            SELECT session_id, title, start_date, end_date
+            FROM training_session
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        if not session_row:
+            raise ValueError("培训班不存在。")
+
+        org_rows = conn.execute(
+            """
+            SELECT org_text
+            FROM enrollment
+            WHERE session_id = ? AND COALESCE(TRIM(org_text), '') <> ''
+            GROUP BY org_text
+            ORDER BY MIN(enrollment_id)
+            """,
+            (session_id,),
+        ).fetchall()
+
+        teacher_rows = conn.execute(
+            """
+            SELECT teacher
+            FROM course
+            WHERE session_id = ? AND COALESCE(TRIM(teacher), '') <> ''
+            ORDER BY COALESCE(start_at, end_at, created_at), course_id
+            """,
+            (session_id,),
+        ).fetchall()
+
+    class_name = (session_row["title"] or "").strip()
+    date_info = build_invitation_date_values(session_row["start_date"] or "", session_row["end_date"] or "")
+    org_list = [str(row["org_text"]).strip() for row in org_rows if str(row["org_text"]).strip()]
+
+    lecturers: List[Dict[str, str]] = []
+    seen = set()
+    for row in teacher_rows:
+        for item in parse_lecturer_items(row["teacher"] or ""):
+            key = (item["name"], item["org"])
+            if key in seen:
+                continue
+            seen.add(key)
+            lecturers.append(item)
+
+    missing: List[str] = []
+    if not class_name:
+        missing.append("CLASS_NAME（培训班名称）")
+    if not date_info["date_range"]:
+        missing.append("DATE_RANGE（培训时间）")
+    if not org_list:
+        missing.append("ORG_LIST（收件单位列表）")
+    if not lecturers:
+        missing.append("LECTURERS（专家授课名单）")
+
+    lecturers_text = "\n".join(
+        f"{it['name']}（{it['org']}）" if it["org"] else it["name"] for it in lecturers
+    )
+
+    placeholders = {
+        "{{ORG_LIST}}": "、".join(org_list),
+        "{{DATE_RANGE}}": date_info["date_range"],
+        "{{START_DATE}}": date_info["start_date"],
+        "{{END_DATE}}": date_info["end_date"],
+        "{{CLASS_NAME}}": class_name,
+        "{{LECTURERS}}": lecturers_text,
+    }
+
+    return {
+        "session_id": session_id,
+        "placeholders": placeholders,
+        "missing_fields": missing,
+    }
+
+
+def replace_placeholders_in_paragraph(paragraph, mapping: Dict[str, str]) -> None:
+    text = paragraph.text or ""
+    replaced = text
+    for key, value in mapping.items():
+        replaced = replaced.replace(key, value)
+    if replaced != text:
+        paragraph.text = replaced
+
+
+def replace_placeholders_in_table(table, mapping: Dict[str, str]) -> None:
+    for row in table.rows:
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                replace_placeholders_in_paragraph(paragraph, mapping)
+            for nested_table in cell.tables:
+                replace_placeholders_in_table(nested_table, mapping)
+
+
+def replace_placeholders_in_docx(doc: Any, mapping: Dict[str, str]) -> None:
+    for paragraph in doc.paragraphs:
+        replace_placeholders_in_paragraph(paragraph, mapping)
+    for table in doc.tables:
+        replace_placeholders_in_table(table, mapping)
+
+    for section in doc.sections:
+        for paragraph in section.header.paragraphs:
+            replace_placeholders_in_paragraph(paragraph, mapping)
+        for table in section.header.tables:
+            replace_placeholders_in_table(table, mapping)
+        for paragraph in section.footer.paragraphs:
+            replace_placeholders_in_paragraph(paragraph, mapping)
+        for table in section.footer.tables:
+            replace_placeholders_in_table(table, mapping)
+
+
+@app.route("/api/session/export/invitation", methods=["POST"])
+def export_session_invitation():
+    session_id_text = request.form.get("session_id", "").strip()
+    if not session_id_text.isdigit():
+        return json_response(False, error="请提供合法 session_id。")
+    session_id = int(session_id_text)
+
+    template_file = request.files.get("template_file")
+    if not template_file or not template_file.filename:
+        return json_response(False, error="请先上传邀请函模板（.docx）。")
+    if not is_word_filename(template_file.filename):
+        return json_response(False, error="邀请函模板仅支持 .docx。")
+
+    _, template_path = save_upload(template_file)
+    try:
+        invitation_data = build_session_invitation_data(session_id)
+    except ValueError as exc:
+        return json_response(False, error=str(exc))
+
+    missing_fields = invitation_data.get("missing_fields") or []
+    if missing_fields:
+        return json_response(
+            False,
+            error="以下信息缺失或不明确，请先确认后再制作邀请函：" + "、".join(missing_fields),
+        )
+
+    try:
+        doc = Document(template_path)
+        replace_placeholders_in_docx(doc, invitation_data["placeholders"])
+        output = io.BytesIO()
+        doc.save(output)
+        output.seek(0)
+        filename = f"session_{session_id}_邀请函.docx"
+        return send_file(
+            output,
+            as_attachment=True,
+            download_name=filename,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    except Exception as exc:
+        app.logger.exception("生成邀请函失败")
+        return json_response(False, error=f"生成邀请函失败：{exc}")
+
+
 @app.route("/api/session/history")
 def session_history():
     with get_connection() as conn:

@@ -167,6 +167,8 @@ function openSessionMaterialModal(sessionItem) {
   if (sessionMaterialResult) {
     sessionMaterialResult.innerHTML = "";
   }
+  const fileInput = document.getElementById("session-invitation-template");
+  if (fileInput) fileInput.value = "";
   sessionMaterialModal.classList.add("show");
 }
 
@@ -176,7 +178,10 @@ function closeSessionMaterialModal() {
   if (sessionMaterialResult) {
     sessionMaterialResult.innerHTML = "";
   }
+  const fileInput = document.getElementById("session-invitation-template");
+  if (fileInput) fileInput.value = "";
 }
+
 
 async function exportSessionSignbook() {
   if (!currentMaterialSessionId || currentMaterialSessionId <= 0) {
@@ -209,6 +214,54 @@ async function exportSessionSignbook() {
   } catch (error) {
     if (sessionMaterialResult) {
       sessionMaterialResult.innerHTML = `<p class="error">导出签到册失败：${error.message}</p>`;
+    }
+  }
+}
+
+
+async function exportSessionInvitation() {
+  if (!currentMaterialSessionId || currentMaterialSessionId <= 0) {
+    if (sessionMaterialResult) {
+      sessionMaterialResult.innerHTML = '<p class="error">未选择培训班，无法导出邀请函。</p>';
+    }
+    return;
+  }
+  const templateFile = document.getElementById("session-invitation-template")?.files?.[0];
+  if (!templateFile) {
+    if (sessionMaterialResult) {
+      sessionMaterialResult.innerHTML = '<p class="error">请先选择邀请函模板文件（.docx）。</p>';
+    }
+    return;
+  }
+  const formData = new FormData();
+  formData.append("session_id", String(currentMaterialSessionId));
+  formData.append("template_file", templateFile);
+
+  try {
+    const resp = await fetch("/api/session/export/invitation", { method: "POST", body: formData });
+    const contentType = resp.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const payload = await resp.json();
+      throw new Error(payload.error || "导出失败");
+    }
+    const blob = await resp.blob();
+    const downloadName = `session_${currentMaterialSessionId}_邀请函.docx`;
+    const tempUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = tempUrl;
+    link.download = downloadName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(tempUrl);
+    const fileInput = document.getElementById("session-invitation-template");
+    if (fileInput) fileInput.value = "";
+    if (sessionMaterialResult) {
+      sessionMaterialResult.innerHTML = "<p>邀请函已生成并开始下载。</p>";
+    }
+  } catch (error) {
+    if (sessionMaterialResult) {
+      sessionMaterialResult.innerHTML = `<p class="error">导出邀请函失败：${error.message}</p>`;
     }
   }
 }
@@ -734,6 +787,7 @@ function bindEvents() {
   document.getElementById("close-session-edit").addEventListener("click", closeSessionEditModal);
   document.getElementById("close-session-material").addEventListener("click", closeSessionMaterialModal);
   document.getElementById("export-session-signbook").addEventListener("click", exportSessionSignbook);
+  document.getElementById("export-session-invitation").addEventListener("click", exportSessionInvitation);
   document.getElementById("save-session-edit").addEventListener("click", saveSessionEdit);
   document.getElementById("reimport-session-course").addEventListener("click", reimportSessionCourse);
   document.getElementById("reimport-session-enrollment").addEventListener("click", reimportSessionEnrollment);
