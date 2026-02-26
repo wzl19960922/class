@@ -111,8 +111,25 @@
       border: 1px solid var(--line);
       box-shadow: 0 20px 45px rgba(2, 6, 23, .25);
     }
+    .modal-wrap { position: relative; }
+    .modal-close-outside {
+      position: absolute;
+      top: -12px;
+      right: -12px;
+      margin: 0;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border-radius: 999px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      color: #0f172a;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, .18);
+      z-index: 2;
+    }
+    .modal-close-outside:hover { transform: translateY(-1px); }
     .modal-block { border: 1px solid #d7e3f8; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff; }
-    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .modal-header { display: flex; align-items: center; margin-bottom: 8px; }
     .modal-actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
     .material-scroll-box {
       margin-top: 8px;
@@ -186,9 +203,6 @@
       <label>搜索</label>
       <input type="text" id="finance-search" placeholder="输入姓名/手机/单位/开户行/编号" />
       <button id="finance-search-btn">搜索</button>
-      <label>按培训班导出老师财务信息（Excel）</label>
-      <input type="number" id="finance-export-session-id" placeholder="输入 session_id，例如 12" />
-      <button id="finance-export-teachers">导出该培训班老师信息</button>
       <div id="finance-list" class="task-box"></div>
     </section>
   </div>
@@ -202,10 +216,11 @@
 
 
   <div id="session-material-modal" class="modal-mask">
+    <div class="modal-wrap">
+    <button id="close-session-material" class="modal-close-outside" aria-label="关闭">&times;</button>
     <div class="modal-panel" style="width:560px;">
       <div class="modal-header">
         <h3 id="session-material-title">制作材料</h3>
-        <button id="close-session-material">关闭</button>
       </div>
       <div class="modal-block">
         <h4>① 制作会议(培训)代表签到册</h4>
@@ -216,22 +231,29 @@
       </div>
       <div class="modal-block">
         <h4>② 制作邀请函（模板替换）</h4>
-        <p class="inline-tip">请上传邀请函模板（.docx），系统会替换：{{ORG_LIST}}、{{DATE_RANGE}}、{{START_DATE}}、{{END_DATE}}、{{CLASS_NAME}}、{{LECTURERS}}。</p>
-        <label>邀请函模板文件（.docx）</label>
-        <input type="file" id="session-invitation-template" accept=".docx" />
+        <p class="inline-tip">{% raw %}系统会使用固定邀请函模板并自动替换：{{ORG_LIST}}、{{DATE_RANGE}}、{{START_DATE}}、{{END_DATE}}、{{CLASS_NAME}}、{{LECTURERS}}、{{LOCATION_TEXT}}、{{TRAINING_GOAL}}、{{SESSION_ID}}。{% endraw %}</p>
         <div class="modal-actions">
           <button id="export-session-invitation">导出邀请函（Word）</button>
         </div>
       </div>
+      <div class="modal-block">
+        <h4>③ 导出老师财务信息（Excel）</h4>
+        <p class="inline-tip">按当前培训班汇总导出老师授课与财务信息（不含课时、签名列）。</p>
+        <div class="modal-actions">
+          <button id="export-session-teachers-finance">导出老师财务信息（Excel）</button>
+        </div>
+      </div>
       <div id="session-material-result" class="result"></div>
+    </div>
     </div>
   </div>
 
   <div id="add-training-modal" class="modal-mask">
+    <div class="modal-wrap">
+    <button id="close-add-training" class="modal-close-outside" aria-label="关闭">&times;</button>
     <div class="modal-panel">
       <div class="modal-header">
         <h3>新增培训班</h3>
-        <button id="close-add-training">关闭</button>
       </div>
 
       <div class="modal-block">
@@ -280,13 +302,15 @@
         <div id="new-enrollment-result" class="result hidden"></div>
       </div>
     </div>
+    </div>
   </div>
 
   <div id="session-edit-modal" class="modal-mask">
+    <div class="modal-wrap">
+    <button id="close-session-edit" class="modal-close-outside" aria-label="关闭">&times;</button>
     <div class="modal-panel" style="width:760px;">
       <div class="modal-header">
         <h3>编辑历史培训班</h3>
-        <button id="close-session-edit">关闭</button>
       </div>
       <input type="hidden" id="session-edit-id" />
 
@@ -337,6 +361,7 @@
       </div>
 
       <div id="session-edit-result" class="result"></div>
+    </div>
     </div>
   </div>
   </div>

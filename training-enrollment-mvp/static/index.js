@@ -59,12 +59,24 @@ function renderCoursePreview(data) {
   }
   sessionCoursePreviewPanel.classList.remove("hidden");
   if (sessionCoursePreviewSummary) {
-    sessionCoursePreviewSummary.textContent = `已上传课程内容（前 ${rows.length} 行，共 ${total} 行）`;
+    sessionCoursePreviewSummary.textContent = `已上传课程内容（显示 ${rows.length} 行，共 ${total} 行）。可直接修改并保存单行。`;
   }
   sessionCourseMaterialList.innerHTML = rows.map((item, idx) => `
     <div class="material-item">
-      <div><strong>${idx + 1}. ${item.title || "(无课程名)"}</strong></div>
-      <div class="inline-tip">讲师：${item.teacher || ""}；时间：${item.start_at || ""}${item.end_at ? ` ~ ${item.end_at}` : ""}；地点：${item.location || ""}</div>
+      <div><strong>${idx + 1}. #${item.course_id || ""}</strong></div>
+      <label>课程名称</label>
+      <input type="text" id="session-course-title-${item.course_id}" value="${item.title || ""}" />
+      <label>讲师</label>
+      <input type="text" id="session-course-teacher-${item.course_id}" value="${item.teacher || ""}" />
+      <label>开始时间</label>
+      <input type="datetime-local" id="session-course-start-${item.course_id}" value="${toDateTimeLocalValue(item.start_at)}" />
+      <label>结束时间</label>
+      <input type="datetime-local" id="session-course-end-${item.course_id}" value="${toDateTimeLocalValue(item.end_at)}" />
+      <label>地点</label>
+      <input type="text" id="session-course-location-${item.course_id}" value="${item.location || ""}" />
+      <div class="modal-actions">
+        <button data-action="save-session-course-inline" data-course-id="${item.course_id}">保存本行课程</button>
+      </div>
     </div>
   `).join("");
 }
@@ -167,8 +179,7 @@ function openSessionMaterialModal(sessionItem) {
   if (sessionMaterialResult) {
     sessionMaterialResult.innerHTML = "";
   }
-  const fileInput = document.getElementById("session-invitation-template");
-  if (fileInput) fileInput.value = "";
+
   sessionMaterialModal.classList.add("show");
 }
 
@@ -178,8 +189,7 @@ function closeSessionMaterialModal() {
   if (sessionMaterialResult) {
     sessionMaterialResult.innerHTML = "";
   }
-  const fileInput = document.getElementById("session-invitation-template");
-  if (fileInput) fileInput.value = "";
+
 }
 
 
@@ -226,16 +236,9 @@ async function exportSessionInvitation() {
     }
     return;
   }
-  const templateFile = document.getElementById("session-invitation-template")?.files?.[0];
-  if (!templateFile) {
-    if (sessionMaterialResult) {
-      sessionMaterialResult.innerHTML = '<p class="error">请先选择邀请函模板文件（.docx）。</p>';
-    }
-    return;
-  }
+
   const formData = new FormData();
   formData.append("session_id", String(currentMaterialSessionId));
-  formData.append("template_file", templateFile);
 
   try {
     const resp = await fetch("/api/session/export/invitation", { method: "POST", body: formData });
@@ -254,8 +257,6 @@ async function exportSessionInvitation() {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(tempUrl);
-    const fileInput = document.getElementById("session-invitation-template");
-    if (fileInput) fileInput.value = "";
     if (sessionMaterialResult) {
       sessionMaterialResult.innerHTML = "<p>邀请函已生成并开始下载。</p>";
     }
@@ -265,7 +266,6 @@ async function exportSessionInvitation() {
     }
   }
 }
-
 async function fetchStats() {
   const year = document.getElementById("year").value.trim();
   if (!/^\d{4}$/.test(year)) {
@@ -492,6 +492,7 @@ async function reimportSessionCourse() {
   const formData = new FormData();
   formData.append("session_id", sessionId);
   formData.append("word_file", file);
+  formData.append("replace_existing", "1");
   try {
     const data = await handleResponse(await fetch("/api/course/import", { method: "POST", body: formData }));
     sessionEditResult.innerHTML = `<p>课程表重新导入成功：新增 ${data.imported_courses} 条课程。</p>`;
@@ -676,15 +677,48 @@ async function fetchFinanceList() {
   }
 }
 
-function exportFinanceTeachersBySession() {
-  const sessionId = document.getElementById("finance-export-session-id").value.trim();
-  if (!/^\d+$/.test(sessionId)) {
-    showResult(financeImportResult, "请输入合法的 session_id 后再导出。", true);
+function exportCurrentSessionTeachersFinance() {
+  if (!currentMaterialSessionId || currentMaterialSessionId <= 0) {
+    if (sessionMaterialResult) {
+      sessionMaterialResult.innerHTML = '<p class="error">未选择培训班，无法导出老师财务信息。</p>';
+    }
     return;
   }
-  window.location.href = `/api/finance/export/session_teachers?session_id=${encodeURIComponent(sessionId)}`;
+  window.location.href = `/api/finance/export/session_teachers?session_id=${encodeURIComponent(String(currentMaterialSessionId))}`;
+  if (sessionMaterialResult) {
+    sessionMaterialResult.innerHTML = "<p>老师财务信息导出已开始。</p>";
+  }
 }
 
+async function saveSessionCourseInline(courseId) {
+  const sessionId = document.getElementById("session-edit-id")?.value?.trim() || "";
+  const title = document.getElementById(`session-course-title-${courseId}`)?.value?.trim() || "";
+  if (!title) {
+    sessionEditResult.innerHTML = '<p class="error">课程名称不能为空。</p>';
+    return;
+  }
+  const payload = {
+    course_id: Number(courseId),
+    title,
+    teacher: document.getElementById(`session-course-teacher-${courseId}`)?.value?.trim() || "",
+    location: document.getElementById(`session-course-location-${courseId}`)?.value?.trim() || "",
+    start_at: document.getElementById(`session-course-start-${courseId}`)?.value?.trim() || "",
+    end_at: document.getElementById(`session-course-end-${courseId}`)?.value?.trim() || "",
+    session_id: sessionId,
+  };
+
+  try {
+    await handleResponse(await fetch("/api/course/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }));
+    sessionEditResult.innerHTML = "<p>课程已保存。</p>";
+    if (sessionId) await refreshSessionMaterialLists(sessionId);
+  } catch (error) {
+    sessionEditResult.innerHTML = `<p class="error">保存课程失败：${error.message}</p>`;
+  }
+}
 async function markTaskSent(taskId) {
   try {
     await handleResponse(await fetch(`/api/tasks/${taskId}/mark_sent`, { method: "POST" }));
@@ -787,7 +821,9 @@ function bindEvents() {
   document.getElementById("close-session-edit").addEventListener("click", closeSessionEditModal);
   document.getElementById("close-session-material").addEventListener("click", closeSessionMaterialModal);
   document.getElementById("export-session-signbook").addEventListener("click", exportSessionSignbook);
+
   document.getElementById("export-session-invitation").addEventListener("click", exportSessionInvitation);
+  document.getElementById("export-session-teachers-finance").addEventListener("click", exportCurrentSessionTeachersFinance);
   document.getElementById("save-session-edit").addEventListener("click", saveSessionEdit);
   document.getElementById("reimport-session-course").addEventListener("click", reimportSessionCourse);
   document.getElementById("reimport-session-enrollment").addEventListener("click", reimportSessionEnrollment);
@@ -797,7 +833,6 @@ function bindEvents() {
   document.getElementById("refresh-logs").addEventListener("click", fetchLogs);
   document.getElementById("finance-import").addEventListener("click", importFinanceCsv);
   document.getElementById("finance-search-btn").addEventListener("click", fetchFinanceList);
-  document.getElementById("finance-export-teachers").addEventListener("click", exportFinanceTeachersBySession);
 
   historyList.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action]");
@@ -814,6 +849,14 @@ function bindEvents() {
     }
   });
 
+
+  sessionCourseMaterialList?.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    if (button.dataset.action === "save-session-course-inline") {
+      await saveSessionCourseInline(Number(button.dataset.courseId));
+    }
+  });
   todayTaskList.addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
@@ -838,6 +881,21 @@ function bindEvents() {
     }
     if (action === "append-map") {
       appendMapToContent(Number(button.dataset.courseId));
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (sessionMaterialModal?.classList.contains("show")) {
+      closeSessionMaterialModal();
+      return;
+    }
+    if (sessionEditModal?.classList.contains("show")) {
+      closeSessionEditModal();
+      return;
+    }
+    if (addTrainingModal?.classList.contains("show")) {
+      closeAddTrainingModal();
     }
   });
 }

@@ -33,6 +33,8 @@ DB_PATH = BASE_DIR / "training.db"
 UPLOAD_DIR = BASE_DIR / "uploads"
 LOG_DIR = BASE_DIR / "logs"
 LOG_PATH = LOG_DIR / "app.log"
+WORD_TEMPLATE_DIR = BASE_DIR / "word_templates"
+INVITATION_TEMPLATE_PATH = WORD_TEMPLATE_DIR / "session_invitation_template.docx"
 
 app = Flask(__name__)
 
@@ -258,6 +260,12 @@ def save_upload(file_storage) -> Tuple[str, str]:
     return saved_name, str(file_path)
 
 
+def save_invitation_template(file_storage) -> str:
+    WORD_TEMPLATE_DIR.mkdir(exist_ok=True)
+    file_storage.save(INVITATION_TEMPLATE_PATH)
+    return str(INVITATION_TEMPLATE_PATH)
+
+
 def compute_sha256(file_path: str) -> str:
     sha256 = hashlib.sha256()
     with open(file_path, "rb") as handle:
@@ -354,11 +362,10 @@ def get_session(session_id: int):
 
         course_rows = conn.execute(
             """
-            SELECT title, teacher, start_at, end_at, location
+            SELECT course_id, title, teacher, start_at, end_at, location
             FROM course
             WHERE session_id = ?
             ORDER BY COALESCE(start_at, ''), course_id
-            LIMIT 8
             """,
             (session_id,),
         ).fetchall()
@@ -981,6 +988,7 @@ def import_course_word():
         return json_response(False, error="仅支持 .docx Word 文件。")
 
     session_id: Optional[int] = None
+    replace_existing = request.form.get("replace_existing", "").strip() == "1"
     default_year = date.today().year
     location_text = ""
     session_id_text = request.form.get("session_id", "").strip()
@@ -1011,6 +1019,12 @@ def import_course_word():
 
     with get_connection() as conn:
         try:
+            deleted_count = 0
+            if replace_existing and session_id is not None:
+                deleted_count = conn.execute(
+                    "DELETE FROM course WHERE session_id = ?",
+                    (session_id,),
+                ).rowcount or 0
             for row in rows:
                 conn.execute(
                     """
@@ -1036,7 +1050,15 @@ def import_course_word():
             conn.rollback()
             raise
 
-    return json_response(True, {"imported_courses": len(rows), "rows": rows[:20]})
+    return json_response(
+        True,
+        {
+            "imported_courses": len(rows),
+            "replaced_existing_courses": bool(replace_existing and session_id is not None),
+            "deleted_existing_courses": deleted_count if replace_existing and session_id is not None else 0,
+            "rows": rows[:20],
+        },
+    )
 
 
 @app.route("/api/course/list")
@@ -1538,7 +1560,8 @@ def split_teacher_names(text: str) -> List[str]:
     raw = (text or "").strip()
     if not raw:
         return []
-    parts = re.split(r"[、,/，;；\s]+", raw)
+    # Split by common delimiters while keeping plain teacher strings.
+    parts = re.split(r"[、,/，;；\n]+", raw)
     return [p.strip() for p in parts if p.strip()]
 
 
@@ -1546,7 +1569,7 @@ def split_teacher_names(text: str) -> List[str]:
 def export_session_teachers_finance():
     session_id_text = request.args.get("session_id", "").strip()
     if not session_id_text.isdigit():
-        return json_response(False, error="请提供合法 session_id。")
+        return json_response(False, error="invalid session_id")
     session_id = int(session_id_text)
 
     with get_connection() as conn:
@@ -1559,7 +1582,7 @@ def export_session_teachers_finance():
             (session_id,),
         ).fetchone()
         if not session_row:
-            return json_response(False, error="培训班不存在。")
+            return json_response(False, error="session not found")
 
         course_rows = conn.execute(
             """
@@ -1573,35 +1596,36 @@ def export_session_teachers_finance():
 
         teacher_map: Dict[str, Dict[str, Any]] = {}
         for course in course_rows:
-            names = split_teacher_names(course["teacher"] or "")
-            if not names:
+            lecturer_items = parse_lecturer_items(course["teacher"] or "")
+            if not lecturer_items:
                 continue
-            for teacher_name in names:
-                if teacher_name not in teacher_map:
-                    teacher_map[teacher_name] = {
+            for item in lecturer_items:
+                teacher_name = (item.get("name") or "").strip()
+                teacher_org = (item.get("org") or "").strip()
+                if not teacher_name:
+                    continue
+                display_name = f"{teacher_name}（{teacher_org}）" if teacher_org else teacher_name
+                info = teacher_map.setdefault(
+                    teacher_name,
+                    {
                         "teacher_name": teacher_name,
+                        "display_name": display_name,
                         "course_titles": set(),
-                        "first_start_at": course["start_at"] or "",
-                        "last_end_at": course["end_at"] or "",
                         "course_location": course["location"] or "",
-                    }
-                teacher_map[teacher_name]["course_titles"].add(course["title"] or "")
-                if course["start_at"] and (
-                    not teacher_map[teacher_name]["first_start_at"]
-                    or course["start_at"] < teacher_map[teacher_name]["first_start_at"]
-                ):
-                    teacher_map[teacher_name]["first_start_at"] = course["start_at"]
-                if course["end_at"] and (
-                    not teacher_map[teacher_name]["last_end_at"]
-                    or course["end_at"] > teacher_map[teacher_name]["last_end_at"]
-                ):
-                    teacher_map[teacher_name]["last_end_at"] = course["end_at"]
+                    },
+                )
+                if teacher_org:
+                    info["display_name"] = display_name
+                info["course_titles"].add(course["title"] or "")
+                if (not info["course_location"]) and course["location"]:
+                    info["course_location"] = course["location"]
 
         export_rows: List[Dict[str, Any]] = []
         for teacher_name, info in teacher_map.items():
             finance = conn.execute(
                 """
-                SELECT name, phone, id_card, org_name, job_title, bank_card, bank_name, city_name, user_type, nickname, updated_at
+                SELECT name, phone, id_card, org_name, job_title,
+                       bank_card, bank_name, city_name
                 FROM finance_record
                 WHERE name = ?
                 ORDER BY COALESCE(start_time, updated_at) DESC, record_id DESC
@@ -1609,32 +1633,22 @@ def export_session_teachers_finance():
                 """,
                 (teacher_name,),
             ).fetchone()
+
             export_rows.append(
                 {
-                    "培训班ID": session_row["session_id"],
-                    "培训班名称": session_row["title"] or "",
-                    "培训时间": f"{session_row['start_date'] or ''}~{session_row['end_date'] or ''}",
-                    "培训地点": session_row["location_text"] or "",
-                    "授课老师": teacher_name,
-                    "课程名称": "；".join(sorted(info["course_titles"])),
-                    "课程开始": info["first_start_at"],
-                    "课程结束": info["last_end_at"],
-                    "课程地点": info["course_location"],
-                    "手机": finance["phone"] if finance else "",
+                    "姓名": teacher_name,
+                    "电话号码": finance["phone"] if finance else "",
                     "身份证号": finance["id_card"] if finance else "",
                     "工作单位": finance["org_name"] if finance else "",
                     "职务/职称": finance["job_title"] if finance else "",
                     "银行卡号": finance["bank_card"] if finance else "",
                     "开户行": finance["bank_name"] if finance else "",
-                    "城市": finance["city_name"] if finance else "",
-                    "用户类型": finance["user_type"] if finance else "",
-                    "昵称": finance["nickname"] if finance else "",
-                    "财务信息更新时间": finance["updated_at"] if finance else "",
+                    "开户地": finance["city_name"] if finance else "",
                 }
             )
 
     if not export_rows:
-        return json_response(False, error="该培训班课程表中未找到授课老师信息，无法导出。")
+        return json_response(False, error="no teacher rows found for this session")
 
     df = pd.DataFrame(export_rows)
     output = io.BytesIO()
@@ -1648,10 +1662,6 @@ def export_session_teachers_finance():
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
-
-
-
 def build_session_date_range_text(start_date: str, end_date: str) -> Tuple[str, str]:
     start_text = (start_date or "").strip()[:10]
     end_text = (end_date or "").strip()[:10]
@@ -1682,7 +1692,7 @@ def export_session_signbook():
     with get_connection() as conn:
         session_row = conn.execute(
             """
-            SELECT session_id, title, start_date, end_date
+            SELECT session_id, title, start_date, end_date, location_text, training_goal
             FROM training_session
             WHERE session_id = ?
             """,
@@ -1779,7 +1789,14 @@ def parse_lecturer_items(raw_text: str) -> List[Dict[str, str]]:
         if match:
             items.append({"name": match.group(1).strip(), "org": match.group(2).strip()})
         else:
-            items.append({"name": text, "org": ""})
+            # Fallback: "姓名 单位/职务" -> 姓名（单位/职务）
+            parts_by_space = re.split(r"\s+", text, maxsplit=1)
+            if len(parts_by_space) == 2 and parts_by_space[0].strip() and parts_by_space[1].strip():
+                items.append(
+                    {"name": parts_by_space[0].strip(), "org": parts_by_space[1].strip()}
+                )
+            else:
+                items.append({"name": text, "org": ""})
     return items
 
 
@@ -1787,7 +1804,7 @@ def build_session_invitation_data(session_id: int) -> Dict[str, Any]:
     with get_connection() as conn:
         session_row = conn.execute(
             """
-            SELECT session_id, title, start_date, end_date
+            SELECT session_id, title, start_date, end_date, location_text, training_goal
             FROM training_session
             WHERE session_id = ?
             """,
@@ -1837,9 +1854,9 @@ def build_session_invitation_data(session_id: int) -> Dict[str, Any]:
     if not date_info["date_range"]:
         missing.append("DATE_RANGE（培训时间）")
     if not org_list:
-        missing.append("ORG_LIST（收件单位列表）")
+        missing.append("ORG_LIST（抬头单位）")
     if not lecturers:
-        missing.append("LECTURERS（专家授课名单）")
+        missing.append("LECTURERS（授课教师及单位）")
 
     lecturers_text = "\n".join(
         f"{it['name']}（{it['org']}）" if it["org"] else it["name"] for it in lecturers
@@ -1852,6 +1869,9 @@ def build_session_invitation_data(session_id: int) -> Dict[str, Any]:
         "{{END_DATE}}": date_info["end_date"],
         "{{CLASS_NAME}}": class_name,
         "{{LECTURERS}}": lecturers_text,
+        "{{LOCATION_TEXT}}": str(session_row["location_text"] or "").strip(),
+        "{{TRAINING_GOAL}}": str(session_row["training_goal"] or "").strip(),
+        "{{SESSION_ID}}": str(session_id),
     }
 
     return {
@@ -1859,8 +1879,6 @@ def build_session_invitation_data(session_id: int) -> Dict[str, Any]:
         "placeholders": placeholders,
         "missing_fields": missing,
     }
-
-
 def replace_placeholders_in_paragraph(paragraph, mapping: Dict[str, str]) -> None:
     text = paragraph.text or ""
     replaced = text
@@ -1900,16 +1918,12 @@ def replace_placeholders_in_docx(doc: Any, mapping: Dict[str, str]) -> None:
 def export_session_invitation():
     session_id_text = request.form.get("session_id", "").strip()
     if not session_id_text.isdigit():
-        return json_response(False, error="请提供合法 session_id。")
+        return json_response(False, error="invalid session_id")
     session_id = int(session_id_text)
 
-    template_file = request.files.get("template_file")
-    if not template_file or not template_file.filename:
-        return json_response(False, error="请先上传邀请函模板（.docx）。")
-    if not is_word_filename(template_file.filename):
-        return json_response(False, error="邀请函模板仅支持 .docx。")
+    if not INVITATION_TEMPLATE_PATH.exists():
+        return json_response(False, error="Invitation template not found. Upload template once first.")
 
-    _, template_path = save_upload(template_file)
     try:
         invitation_data = build_session_invitation_data(session_id)
     except ValueError as exc:
@@ -1919,16 +1933,16 @@ def export_session_invitation():
     if missing_fields:
         return json_response(
             False,
-            error="以下信息缺失或不明确，请先确认后再制作邀请函：" + "、".join(missing_fields),
+            error="Missing data for invitation template placeholders: " + ", ".join(missing_fields),
         )
 
     try:
-        doc = Document(template_path)
+        doc = Document(str(INVITATION_TEMPLATE_PATH))
         replace_placeholders_in_docx(doc, invitation_data["placeholders"])
         output = io.BytesIO()
         doc.save(output)
         output.seek(0)
-        filename = f"session_{session_id}_邀请函.docx"
+        filename = f"session_{session_id}_invitation.docx"
         return send_file(
             output,
             as_attachment=True,
@@ -1936,10 +1950,29 @@ def export_session_invitation():
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
     except Exception as exc:
-        app.logger.exception("生成邀请函失败")
-        return json_response(False, error=f"生成邀请函失败：{exc}")
+        app.logger.exception("Invitation generation failed")
+        return json_response(False, error=f"Invitation generation failed: {exc}")
 
 
+@app.route("/api/template/invitation/upload", methods=["POST"])
+def upload_invitation_template():
+    template_file = request.files.get("template_file")
+    if not template_file or not template_file.filename:
+        return json_response(False, error="Please upload a .docx invitation template.")
+    if not is_word_filename(template_file.filename):
+        return json_response(False, error="Invitation template must be a .docx file.")
+    try:
+        save_invitation_template(template_file)
+        return json_response(
+            True,
+            {
+                "template_name": INVITATION_TEMPLATE_PATH.name,
+                "template_path": str(INVITATION_TEMPLATE_PATH),
+            },
+        )
+    except Exception as exc:
+        app.logger.exception("Invitation template upload failed")
+        return json_response(False, error=f"Invitation template upload failed: {exc}")
 @app.route("/api/session/history")
 def session_history():
     with get_connection() as conn:
@@ -2030,5 +2063,7 @@ def export_year():
 if __name__ == "__main__":
     setup_logging()
     initialize_database()
-    print("本地服务已启动，请访问 http://127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=5000)
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "5000"))
+    print(f"Server started: http://{host}:{port}")
+    app.run(host=host, port=port)
